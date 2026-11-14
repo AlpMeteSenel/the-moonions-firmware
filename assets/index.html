@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="it">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rover Luna</title>
+<style>
+body{font:16px system-ui,sans-serif;background:#10181f;color:#eef5f6;max-width:960px;margin:auto;padding:24px}
+section{background:#1c2a33;padding:20px;border-radius:12px;margin:14px 0}
+h1,h2{margin-top:0} label{display:block;margin:12px 0} button,input{font:inherit}
+button{padding:8px 12px;margin:4px;border:0;border-radius:6px;background:#a4e7ce;color:#102820;cursor:pointer}
+button:disabled{opacity:.5} img{display:block;max-width:100%;max-height:520px;margin-top:12px}
+img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-wrap}
+</style>
+<h1>Rover Luna</h1>
+<section>
+<h2>Mappa e fotogramma</h2>
+<label>Mappa di riferimento <input id="mapFile" type="file" accept="image/jpeg,image/png"></label>
+<button id="download">Scarica la mappa dal PC</button>
+<label>Fotogramma da file <input id="frameFile" type="file" accept="image/jpeg,image/png"></label>
+<label><input id="correctColors" type="checkbox" checked> Correggi i colori della camera</label>
+<button id="capture">Scatta con Arduino</button>
+<button id="match">Localizza sulla mappa</button>
+<button id="landing">Prova atterraggio (5 s)</button>
+<button id="live">Avvia localizzazione live</button>
+<output id="visionStatus" aria-live="polite"></output>
+<img id="framePreview" alt="Ultimo fotogramma">
+<img id="mapPreview" alt="Mappa di riferimento con il contorno riconosciuto">
+</section>
+<section>
+<h2>Sensore A0</h2>
+<button id="dark">Registra al buio</button>
+<button id="lit">Registra con luce</button>
+<output id="lightStatus" aria-live="polite">Attendo la prima lettura…</output>
+</section>
+<section>
+<h2>Modulino Movement</h2>
+<button id="calibrateImu">Calibra IMU a rover fermo</button>
+<output id="imuStatus" aria-live="polite"></output>
+</section>
+<script>
+const get = id => document.getElementById(id);
+let reference, frame;
+let visionBusy = false;
+let liveActive = false;
+let lightBusy = false;
+async function post(path, data) {
+    const response = await fetch(path, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: data === undefined ? undefined : JSON.stringify(data)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Errore HTTP " + response.status);
+    return result;
+}
+function readPhoto(file) {
+    return new Promise((resolve, reject) => {
+        if (file.size > 12 * 1024 * 1024) return reject(new Error("La foto supera 12 MB."));
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Impossibile leggere la foto."));
+        reader.readAsDataURL(file);
+    });
+}
+async function vision(action) {
+    if (visionBusy) return;
+    visionBusy = true;
+    const controls = ["mapFile", "frameFile", "download", "capture", "match", "landing", "correctColors", "live"].map(get);
+    controls.forEach(control => control.disabled = true);
+    get("visionStatus").textContent = "Elaborazione…";
+    try {
+        get("visionStatus").textContent = await action();
+    } catch (error) {
+        if (reference) get("mapPreview").src = reference;
+        get("visionStatus").textContent = error.message;
+    } finally {
+        controls.forEach(control => control.disabled = false);
+        visionBusy = false;
+    }
+}
+function showMap(image) {
+    reference = image;
+    get("mapPreview").src = image;
+    return "Mappa pronta.";
+}
+function showFrame(image) {
+    frame = image;
+    get("framePreview").src = image;
+    if (reference) get("mapPreview").src = reference;
+    return "Fotogramma pronto.";
+}
+get("mapFile").onchange = event => {
+    const file = event.target.files[0];
+    if (file) vision(async () => showMap(await readPhoto(file)));
+};
+get("frameFile").onchange = event => {
+    const file = event.target.files[0];
+    if (file) vision(async () => showFrame(await readPhoto(file)));
+};
+get("capture").onclick = () => vision(async () => showFrame((await post("/capture?correct_colors=" + get("correctColors").checked)).frame));
+get("download").onclick = () => vision(async () => showMap((await post("/map")).map));
+get("match").onclick = () => vision(async () => {
+    if (!reference || !frame) throw new Error("Scegli una mappa e acquisisci un fotogramma.");
+    const result = await post("/match", {map: reference.split(",")[1], frame: frame.split(",")[1]});
+    get("mapPreview").src = result.overlay;
+    return (result.tentative ? "Stima indicativa (da confermare). Centro: " : "Centro sulla mappa: ") + result.x + ", " + result.y + " px · Direzione nella foto: " +
+        result.angle + "° · Punti coerenti: " + result.inliers + "/" + result.matches;
+});
+get("landing").onclick = () => vision(async () => {
+    if (!reference) throw new Error("Carica prima la mappa.");
+    get("visionStatus").textContent = "Acquisizione: simula la discesa e tieni ferma la camera negli ultimi 2 secondi.";
+    get("mapPreview").src = reference;
+    const result = await post("/landing?correct_colors=" + get("correctColors").checked, {map: reference.split(",")[1]});
+    showFrame(result.frame);
+    const counts = result.valid + " match finali validi su " + result.total + " fotogrammi acquisiti.";
+    if (!result.confirmed && !result.overlay) {
+        return ["Nessuna proiezione plausibile. " + counts, ...result.diagnostics].join("\n");
+    }
+    if (!result.confirmed) {
+        get("mapPreview").src = result.overlay;
+        return "Stima indicativa a " + result.timestamp + " s. Centro: " + result.x + ", " +
+            result.y + " px. Punti coerenti: " + result.inliers + "/" + result.matches + ".";
+    }
+    get("mapPreview").src = result.overlay;
+    return "Centro: " + result.x + ", " + result.y + " px. Direzione: " + result.angle + "?. " + counts;
+});
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function livePreview() {
+    while (liveActive) {
+        const result = await post("/live/preview");
+        if (liveActive && result.frame) {
+            frame = result.frame;
+            get("framePreview").src = frame;
+        }
+        await pause(180);
+    }
+}
+async function livePosition() {
+    let lastFix;
+    while (liveActive) {
+        const result = await post("/live/match");
+        if (!liveActive) return;
+        if (result.overlay) {
+            lastFix = performance.now();
+            get("mapPreview").src = result.overlay;
+            get("visionStatus").textContent =
+                (result.tentative ? "Stima indicativa" : "Posizione live") +
+                " ? Centro: " + result.x + ", " + result.y + " px ? Direzione: " +
+                result.angle + "? ? Punti: " + result.inliers + "/" + result.matches +
+                " ? " + (result.mode === "tracking" ? "Tracciamento" : "Confronto mappa") +
+                ": " + result.seconds + " s";
+        } else if (!result.waiting) {
+            const previous = lastFix ? " ? Ultima stima: " +
+                ((performance.now() - lastFix) / 1000).toFixed(1) + " s fa" : "";
+            get("visionStatus").textContent = "Nessuna stima per il fotogramma corrente" +
+                previous + " ? Calcolo: " + result.seconds + " s. " + result.diagnostic;
+        }
+        await pause(250);
+    }
+}
+get("live").onclick = () => {
+    if (liveActive) {
+        liveActive = false;
+        get("live").disabled = true;
+        return;
+    }
+    vision(async () => {
+        if (!reference) throw new Error("Carica prima la mappa.");
+        await post("/live/start?correct_colors=" + get("correctColors").checked,
+            {map: reference.split(",")[1]});
+        liveActive = true;
+        get("mapPreview").src = reference;
+        get("live").textContent = "Ferma live";
+        get("live").disabled = false;
+        get("visionStatus").textContent = "Avvio camera e ricerca posizione?";
+        try {
+            await Promise.race([livePreview(), livePosition()]);
+            return "Localizzazione live terminata.";
+        } finally {
+            liveActive = false;
+            get("live").textContent = "Avvia localizzazione live";
+            await post("/live/stop");
+        }
+    });
+};
+window.addEventListener("pagehide", () => {
+    if (liveActive) navigator.sendBeacon("/live/stop");
+});
+async function sampleLight(sample) {
+    if (lightBusy) return;
+    lightBusy = true;
+    get("dark").disabled = get("lit").disabled = true;
+    try {
+        const result = await post("/light" + (sample ? "?sample=" + sample : ""));
+        const state = result.light === null ? "Da calibrare" : result.light ? "LUCE" : "BUIO";
+        get("lightStatus").textContent = state + " · ADC " + result.raw +
+            " · Buio " + (result.samples.dark ?? "—") + " · Luce " + (result.samples.lit ?? "—");
+    } catch (error) {
+        get("lightStatus").textContent = error.message;
+    } finally {
+        get("dark").disabled = get("lit").disabled = false;
+        lightBusy = false;
+    }
+}
+get("dark").onclick = () => sampleLight("dark");
+get("lit").onclick = () => sampleLight("lit");
+async function refreshImu() {
+    try {
+        const result = await post("/imu");
+        const status = result.status === "ready" ?
+            "Roll " + result.roll + "? ? Pitch " + result.pitch + "? ? Yaw relativo " +
+            result.yaw + "? ? Accelerazione " + result.acceleration + " m/s?" :
+            result.status === "unavailable" ? "IMU non rilevata sulla porta Qwiic." :
+            "Tieni fermo il rover per calibrare l'IMU (" + (result.samples || 0) + "/40).";
+        get("imuStatus").textContent = status;
+    } catch (error) {
+        get("imuStatus").textContent = error.message;
+    }
+}
+get("calibrateImu").onclick = async () => {
+    await post("/imu/calibrate");
+    await refreshImu();
+};
+refreshImu();
+setInterval(refreshImu, 350);
+sampleLight();
+setInterval(sampleLight, 1500);
+</script>
+</html>

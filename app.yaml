@@ -1,0 +1,5 @@
+name: Rover Luna
+icon: 🌕
+description: Localizzazione su una mappa fotografica e lettura luce.
+bricks:
+  - arduino:web_ui
