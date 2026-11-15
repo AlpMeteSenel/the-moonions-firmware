@@ -46,6 +46,9 @@ img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-
     <h3>Rover position</h3>
     <output id="poseStatus" class="nav-status">Waiting for the camera…</output>
     <output id="heightStatus" class="nav-status">Height · Waiting for a pose</output>
+    <label>Measured starting height (m) <input id="initialHeight" type="number" min="0.001" step="any" placeholder="0.75"></label>
+    <button id="setHeight">Set IMU starting height</button>
+    <output id="heightSetupStatus" class="nav-status" aria-live="polite"></output>
     <div class="nav-stage">
       <img id="navMap" alt="Reference map">
       <div id="roverPoint" class="rover-point" hidden><span id="roverHeading" class="rover-heading"></span></div>
@@ -205,8 +208,10 @@ function showPose(pose) {
     if (pose?.z_m != null) {
         const heightLabel = {
             camera: "Camera height",
+            initial: "Measured starting height",
             imu: "IMU estimated height",
             last_imu: "Last IMU height",
+            last_initial: "Last measured starting height",
             last_camera: "Last camera height"
         }[pose.height_source];
         height.textContent = heightLabel + " · " + pose.z_m.toFixed(3) + " m above map" +
@@ -237,6 +242,19 @@ function showPose(pose) {
         (state === "stale" ? " · " + (pose.frame_age_ms / 1000).toFixed(1) + " s ago" : "") +
         (heading.hidden ? "" : " · " + source + " " + pose.heading_deg + "°");
 }
+get("setHeight").onclick = async () => {
+    const button = get("setHeight");
+    const status = get("heightSetupStatus");
+    button.disabled = true;
+    try {
+        await post("/live/height", {height_m: get("initialHeight").valueAsNumber});
+        status.textContent = "";
+    } catch (error) {
+        status.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+};
 async function livePreview() {
     const start = performance.now();
     let receivedFrame = false;
@@ -284,6 +302,7 @@ get("live").onclick = () => {
         get("navMap").src = reference;
         get("navFrame").removeAttribute("src");
         get("liveNavigation").hidden = false;
+        get("heightSetupStatus").textContent = "";
         get("framePreview").hidden = get("mapPreview").hidden = true;
         showPose(null);
         get("live").textContent = "Stop live tracking";

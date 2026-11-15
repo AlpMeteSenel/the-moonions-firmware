@@ -190,6 +190,7 @@ class LiveSession:
         self.last_matched = None
         self.tracking = None
         self.last_fix = 0
+        self.last_map_attempt = 0
         self.pose = MapPose()
 
     def pose_snapshot(self):
@@ -208,17 +209,30 @@ class LiveSession:
         gray = cv.cvtColor(view, cv.COLOR_BGR2GRAY)
         if np.percentile(gray[::4, ::4], 99) < 12:
             raise ValueError("Camera view is too dark for map matching.")
-        if self.tracking is not None and timestamp - self.last_fix < 5:
+        tracked = None
+        if self.tracking is not None and timestamp - self.last_fix < 12:
             previous_time, previous, points, transform, tentative = self.tracking
             if timestamp - previous_time < 1.5:
-                result = self.track(gray, previous, points, transform, tentative, timestamp)
-                if result is not None:
-                    overlay, estimate = result
+                tracked = self.track(gray, previous, points, transform, tentative, timestamp)
+                if tracked is not None and not tentative and (
+                    timestamp - self.last_fix < 5 or timestamp - self.last_map_attempt < 2
+                ):
+                    overlay, estimate = tracked
                     return overlay, self.add_height(estimate, gray.shape, frame.shape)
+        self.last_map_attempt = timestamp
+        try:
+            overlay, estimate = self.matcher.locate(view, allow_tentative=True, include_transform=True)
+        except ValueError:
+            if tracked is None or tracked[1]["tentative"]:
+                raise
+            overlay, estimate = tracked
+            return overlay, self.add_height(estimate, gray.shape, frame.shape)
+        if estimate["tentative"] and tracked is not None and not tracked[1]["tentative"]:
+            overlay, estimate = tracked
+            return overlay, self.add_height(estimate, gray.shape, frame.shape)
         self.tracking = None
-        overlay, estimate = self.matcher.locate(view, allow_tentative=True, include_transform=True)
         transform = estimate["transform"]
-        points = cv.goodFeaturesToTrack(gray, 180, 0.015, 9)
+        points = cv.goodFeaturesToTrack(gray, 180, 0.01, 7)
         if points is not None and len(points) >= 12:
             self.tracking = (timestamp, gray, points, transform, estimate["tentative"])
             self.last_fix = timestamp
@@ -233,14 +247,14 @@ class LiveSession:
         return estimate
 
     def track(self, gray, previous, points, transform, tentative, timestamp):
-        moved, found, _ = cv.calcOpticalFlowPyrLK(previous, gray, points, None)
+        moved, found, _ = cv.calcOpticalFlowPyrLK(previous, gray, points, None, winSize=(31, 31))
         if moved is None or found is None:
             return
-        back, returned, _ = cv.calcOpticalFlowPyrLK(gray, previous, moved, None)
+        back, returned, _ = cv.calcOpticalFlowPyrLK(gray, previous, moved, None, winSize=(31, 31))
         if back is None or returned is None:
             return
         good = (found.ravel() == 1) & (returned.ravel() == 1) & (
-            np.linalg.norm((back - points).reshape(-1, 2), axis=1) < 1.2)
+            np.linalg.norm((back - points).reshape(-1, 2), axis=1) < 1.6)
         if good.sum() < 12:
             return
         motion, mask = cv.findHomography(moved[good], points[good], cv.RANSAC, 2.0)
@@ -255,6 +269,15 @@ class LiveSession:
                                                 len(tracked), len(points), tentative)
         except ValueError:
             return
+        if len(tracked) < 100:
+            mask = np.zeros_like(gray)
+            hull = np.rint(cv.convexHull(tracked)).astype(np.int32)
+            cv.fillConvexPoly(mask, hull, 255)
+            for x, y in np.rint(tracked.reshape(-1, 2)).astype(int):
+                cv.circle(mask, (x, y), 7, 0, -1)
+            extra = cv.goodFeaturesToTrack(gray, 180 - len(tracked), 0.01, 7, mask=mask)
+            if extra is not None:
+                tracked = np.concatenate((tracked, extra))
         self.tracking = (timestamp, gray, tracked, mapped, tentative)
         return overlay, {**estimate, "mode": "tracking"}
 
@@ -330,6 +353,21 @@ def live_preview():
     }
 
 
+def seed_live_height(payload: dict):
+    session = active_live()
+    if session is None:
+        return JSONResponse({"error": "Start live tracking before setting height."}, 409)
+    try:
+        height = float(payload["height_m"])
+        if not math.isfinite(height) or height <= 0:
+            raise ValueError()
+    except (TypeError, ValueError, KeyError, OverflowError):
+        return JSONResponse({"error": "Enter a positive height in meters."}, 422)
+    if not session.pose.seed_height(height, attitude.snapshot()):
+        return JSONResponse({"error": "Wait for the IMU to calibrate before setting height."}, 409)
+    return {"z_m": height, "height_source": "initial"}
+
+
 def get_map_pose():
     session = live_session
     active = session is not None and not session.stop.is_set()
@@ -386,6 +424,7 @@ ui.expose_api("POST", "/live/start", start_live)
 ui.expose_api("POST", "/live/stop", end_live)
 ui.expose_api("POST", "/live/preview", live_preview)
 ui.expose_api("POST", "/live/match", live_match)
+ui.expose_api("POST", "/live/height", seed_live_height)
 ui.expose_api("GET", "/api/pose", get_map_pose)
 ui.expose_api("POST", "/capture", capture)
 ui.expose_api("POST", "/map", downloaded_map)

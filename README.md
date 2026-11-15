@@ -132,15 +132,17 @@ from the API as the key, and the map scale in meters per pixel and
 `(fx, fy, cx, cy)` as the value. Measure the camera intrinsics at
 1280 × 960 in the camera's capture mode. Use a flat, orthorectified map with
 uniform scale and a camera with negligible residual lens distortion.
-The estimate uses the visual homography and returns null without matching
-calibration or an earlier reliable visual height. During a brief camera
-dropout, the app projects IMU acceleration onto the vertical axis, subtracts
-gravity, and integrates from the most recent visual height and vertical
-speed. Touchdown, expiry, or a gap in readings holds the last IMU height
-when available. `height_source` is `camera`, `imu`, `last_imu`,
-`last_camera`, or null. `height_age_ms` reports the age of the visual
+During live tracking, enter the measured lens-to-surface height while
+stationary and click **Set IMU starting height** to start estimating before
+the first camera match. API clients can send that measurement to
+`POST /live/height` as `{"height_m": 0.75}`.
+Rover Luna projects IMU acceleration onto the vertical axis and subtracts
+gravity. Reliable visual heights correct the inertial prediction and reset
+the height anchor. Expiry or a gap in readings holds the last estimate.
+`height_source` is `initial`, `camera`, `imu`, `last_initial`,
+`last_imu`, `last_camera`, or null. `height_age_ms` reports the age of the
 anchor and `height_estimate_age_ms` reports the age of the displayed estimate.
-The IMU estimate is limited to four seconds from the visual anchor because
+The IMU estimate is limited to four seconds from a measured or visual anchor because
 acceleration and tilt errors drift. Live tracking skips nearly black frames.
 Subtract the camera's height above the lander reference point
 when appropriate for the mounted orientation.
@@ -150,3 +152,7 @@ The included bench calibrations apply to the exact `download (7).jpg` and
 and 55 pixels respectively, and a reference camera height of about 0.75 m.
 They assume a near-overhead reference view and a centered principal point.
 Verify the scale against a second known height before relying on the measurements.
+
+Live X/Y tracking refreshes its feature points as the camera moves. It
+tries to re-match the full map periodically and can keep a geometrically
+consistent track for up to 12 seconds after the last map match.
