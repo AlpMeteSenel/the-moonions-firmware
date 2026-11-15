@@ -294,7 +294,7 @@ async function refreshImu() {
         const status = result.status === "ready" ?
             "Roll " + result.roll + "° · Pitch " + result.pitch + "° · Relative yaw " +
             result.yaw + "° · Acceleration " + result.acceleration + " m/s²" :
-            result.status === "unavailable" ? "IMU unavailable on the Qwiic port." :
+            result.status === "unavailable" ? "Waiting for the Modulino Movement to respond on I²C." :
             result.status === "stale" ? "IMU readings are stale." :
             "Keep the rover still while the IMU calibrates (" + (result.samples || 0) + "/40).";
         get("imuStatus").textContent = status;

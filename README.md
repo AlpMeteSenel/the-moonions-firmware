@@ -13,7 +13,7 @@
 
 ## 2. Prova le immagini
 
-1. Carica la foto completa sotto **Mappa di riferimento**. Per il primo test usa un foglio piano fotografato il più possibile dall'alto, ben illuminato.
+1. Sotto **Reference map** premi **Choose File** e seleziona la foto completa in JPG o PNG. Per il primo test usa un foglio piano fotografato dall'alto, ben illuminato. Per inviare la posa all'altro sito, carica la stessa immagine usata dal sito e premi **Start live tracking**.
 2. Punta la camera su una parte della stessa superficie e premi **Scatta con Arduino**. In alternativa carica una seconda foto sotto **Fotogramma da file**, utile per provare anche con due scatti del telefono.
 3. Premi **Localizza sulla mappa**. Il contorno verde indica l'area inquadrata e la freccia punta verso il bordo superiore del fotogramma. Il centro è in pixel della mappa, con origine in alto a sinistra. L'angolo è in gradi nel piano dell'immagine, positivo in senso orario a partire dall'alto.
 
@@ -48,7 +48,9 @@ La correzione ? attiva al primo avvio e si applica ai nuovi fotogrammi Arduino, 
 
 ## Modulino Movement attitude
 
-Connect the Modulino Movement to the UNO Q Qwiic connector (Wire1, IMU address 0x6A).
+Connect the Modulino Movement to the UNO Q Qwiic connector. The firmware checks
+addresses 0x6A and 0x6B on Qwiic and the UNO header I²C bus, and retries if the
+sensor does not respond.
 Keep the rover stationary at startup or press **Calibrate IMU while stationary**.
 The app uses 40 stationary samples for gyro bias and accelerometer magnitude
 calibration. Earth gravity is set to 9.81 m/s² in python/imu.py. Gravity aids
