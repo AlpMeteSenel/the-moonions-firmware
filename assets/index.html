@@ -57,13 +57,9 @@ img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-
 </div>
 </section>
 <section>
-<h2>A0 light sensor</h2>
-<button id="dark">Calibrate in darkness</button>
-<button id="lit">Calibrate in light</button>
-<output id="lightStatus" aria-live="polite">Waiting for the first reading…</output>
-</section>
-<section>
-<h2>Modulino Movement</h2>
+<h2>Lander status</h2>
+<button id="armLander" disabled>Arm landing detection</button>
+<output id="landerStatus" aria-live="polite">Waiting for the IMU…</output>
 <button id="calibrateImu">Calibrate IMU while stationary</button>
 <output id="imuStatus" aria-live="polite"></output>
 </section>
@@ -72,7 +68,6 @@ const get = id => document.getElementById(id);
 let reference, frame;
 let visionBusy = false;
 let liveActive = false;
-let lightBusy = false;
 const CAMERA_WAIT_MS = 12000;
 const CAMERA_UNAVAILABLE = "The Uno Q camera did not respond. Check whether another app is using it.";
 const diagnosticTranslations = [
@@ -293,24 +288,6 @@ get("live").onclick = () => {
 window.addEventListener("pagehide", () => {
     if (liveActive) navigator.sendBeacon("/live/stop");
 });
-async function sampleLight(sample) {
-    if (lightBusy) return;
-    lightBusy = true;
-    get("dark").disabled = get("lit").disabled = true;
-    try {
-        const result = await post("/light" + (sample ? "?sample=" + sample : ""));
-        const state = result.light === null ? "Calibration needed" : result.light ? "Light" : "Dark";
-        get("lightStatus").textContent = state + " · ADC " + result.raw +
-            " · Dark " + (result.samples.dark ?? "—") + " · Light " + (result.samples.lit ?? "—");
-    } catch (error) {
-        get("lightStatus").textContent = error.message;
-    } finally {
-        get("dark").disabled = get("lit").disabled = false;
-        lightBusy = false;
-    }
-}
-get("dark").onclick = () => sampleLight("dark");
-get("lit").onclick = () => sampleLight("lit");
 async function refreshImu() {
     try {
         const result = await post("/imu");
@@ -321,8 +298,13 @@ async function refreshImu() {
             result.status === "stale" ? "IMU readings are stale." :
             "Keep the rover still while the IMU calibrates (" + (result.samples || 0) + "/40).";
         get("imuStatus").textContent = status;
+        get("armLander").disabled = result.status !== "ready" || result.lander_status === "in_air";
+        get("landerStatus").textContent = result.status === "ready" ?
+            {ready: "Ready", in_air: "In air", landed: "Landed"}[result.lander_status] :
+            "Waiting for the IMU…";
     } catch (error) {
         get("imuStatus").textContent = error.message;
+        get("armLander").disabled = true;
     }
 }
 get("calibrateImu").onclick = async () => {
@@ -331,7 +313,14 @@ get("calibrateImu").onclick = async () => {
 };
 refreshImu();
 setInterval(refreshImu, 350);
-sampleLight();
-setInterval(sampleLight, 1500);
+get("armLander").onclick = async () => {
+    get("armLander").disabled = true;
+    try {
+        await post("/lander/arm");
+        await refreshImu();
+    } catch (error) {
+        get("landerStatus").textContent = error.message;
+    }
+};
 </script>
 </html>

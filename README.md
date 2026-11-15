@@ -19,13 +19,7 @@
 
 Il prototipo usa SIFT e un'omografia stimata con RANSAC per una superficie piana. L'angolo misura la direzione proiettata nel quadro di riferimento fotografico. Per ottenere posizione in centimetri e yaw fisico al touchdown servono coordinate metriche sulla superficie, calibrazione e montaggio della camera, e un evento o un fotogramma che identifichi l'atterraggio. Puoi usare lo scatto manuale o una sequenza breve con il pulsante descritto qui sotto.
 
-## 3. Calibra il sensore su A0
-
-Con la pagina aperta, spegni la lampada e premi **Registra al buio**. Poi accendila e premi **Registra con luce**. Il valore ADC si aggiorna ogni 1,5 secondi e lo stato passa a **LUCE** o **BUIO**. Se resta **Da calibrare**, aumenta la differenza fra le due condizioni e registra di nuovo entrambe. Le letture periodiche dipendono dalla pagina aperta. La calibrazione si perde quando riavvii l'app.
-
-Il codice assume un OLED I²C SSD1306 su `Wire` all'indirizzo predefinito della libreria. Se la pagina mostra valori ma l'OLED resta vuoto, controlla il controller del modulo. Per un SH1106 sostituisci `U8X8_SSD1306_128X64_NONAME_HW_I2C` con `U8X8_SH1106_128X64_NONAME_HW_I2C` in `sketch/sketch.ino`, poi salva e riavvia l'app. Se il modulo usa l'indirizzo 0x3D, aggiungi `display.setI2CAddress(0x3D << 1);` prima di `display.begin();`.
-
-## 4. Scarica la mappa dall'altro PC via Wi-Fi
+## 3. Scarica la mappa dall'altro PC via Wi-Fi
 
 1. Sul PC che ospita la mappa crea una cartella con il solo file `mappa.jpg`. Apri PowerShell in quella cartella e avvia `py -m http.server 8000` (oppure `python -m http.server 8000`). Lascia la finestra aperta mentre fai le prove.
 2. Usa `ipconfig` sul PC per trovare il suo IPv4 Wi-Fi e assicurati che anche l'UNO Q sia sulla stessa rete. Se Windows chiede di consentire Python nel firewall, scegli la rete privata.
@@ -43,7 +37,7 @@ Il codice assume un OLED I²C SSD1306 su `Wire` all'indirizzo predefinito della 
 
 ## Prova di atterraggio
 
-Con la mappa caricata, premi **Prova atterraggio (5 s)**. Abbassa la camera simulando la discesa e tienila ferma negli ultimi due secondi. L'app acquisisce otto fotogrammi a intervalli di circa mezzo secondo e tenta il matching sugli ultimi. Mostra una stima solo se almeno due fotogrammi finali concordano su centro e direzione. L'ultimo match deve essere vicino alla fine della cattura. Il pulsante simula il momento dell'atterraggio usando la fine della sequenza. Non richiede il sensore di luce.
+Con la mappa caricata, premi **Prova atterraggio (5 s)**. Abbassa la camera simulando la discesa e tienila ferma negli ultimi due secondi. L'app acquisisce otto fotogrammi a intervalli di circa mezzo secondo e tenta il matching sugli ultimi. Mostra una stima solo se almeno due fotogrammi finali concordano su centro e direzione. L'ultimo match deve essere vicino alla fine della cattura. Il pulsante simula il momento dell'atterraggio usando la fine della sequenza.
 
 Se la posizione non viene confermata, l'app mostra l'ultimo fotogramma. Controlla che sia nitido e contenga piu dettagli della mappa, poi riprova.
 
@@ -103,3 +97,29 @@ Example response:
   Use this field to style or hide the marker independently of imu_estimated.
 - map.id hashes the exact image bytes supplied to live tracking. map is
   null while inactive. Position fields are null while inactive or waiting.
+
+
+## OLED landing status
+
+With the rover at rest, wait for IMU calibration and press **Arm landing
+detection** just before the bench descent. The OLED shows READY before arming,
+IN AIR after arming, and LANDED after detected motion followed by two continuous
+seconds near local gravity and low angular rate. LANDED stays latched until
+the next arming. The web dashboard reports the same lander state.
+
+The IMU rule estimates touchdown from motion and settling. Hovering or a
+pause in motion can produce the same readings as rest on a surface. Ground
+contact confirmation requires another measurement.
+
+### Height above the map
+
+The pose response also includes `z_m`, the estimated distance in meters from
+the camera center to the mapped surface. X and Y still use map pixels.
+Set `HEIGHT_CALIBRATION` in `python/main.py` to a tuple of the map ID from the
+API, the map scale in meters per pixel, and `(fx, fy, cx, cy)` measured at
+1280 × 960 in the camera's capture mode. Use a flat, orthorectified map with
+uniform scale and a camera with negligible residual lens distortion.
+The estimate uses the visual homography and returns null without matching
+calibration or adequate visual geometry. For stale fixes, any height is also
+last known. Subtract the camera's height above the lander reference point
+when appropriate for the mounted orientation.

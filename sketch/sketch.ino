@@ -4,7 +4,6 @@
 
 // Change to U8X8_SH1106_128X64_NONAME_HW_I2C if the module uses SH1106.
 U8X8_SSD1306_128X64_NONAME_HW_I2C display(U8X8_PIN_NONE);
-int lightState = -1;
 LSM6DSOXClass movement(Wire1, 0x6A);
 bool imuReady = false;
 
@@ -26,32 +25,20 @@ String readImu() {
 }
 
 
-int readLight() {
-    int total = 0;
-    for (int sample = 0; sample < 16; ++sample) {
-        total += analogRead(A0);
-    }
-    return total / 16;
-}
-
-void setLight(int state) {
-    if (state == lightState) {
-        return;
-    }
-    lightState = state;
-    display.clearDisplay();
-    display.drawString(0, 0, state < 0 ? "CALIBRA LUCE" : state ? "LUCE" : "BUIO");
+void showLanderStatus(String status) {
+    display.clearLine(3);
+    display.drawString(0, 3, status.c_str());
 }
 
 void setup() {
     display.begin();
     display.setFont(u8x8_font_chroma48medium8_r);
-    display.drawString(0, 0, "CALIBRA LUCE");
+    display.drawString(0, 0, "LANDER STATUS");
+    showLanderStatus("STARTING");
     imuReady = movement.begin();
     Bridge.begin();
     Bridge.provide("rover_read_imu", readImu);
-    Bridge.provide("rover_read_light", readLight);
-    Bridge.provide("rover_set_light", setLight);
+    Bridge.provide("rover_lander_status", showLanderStatus);
 }
 
 void loop() {

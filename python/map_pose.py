@@ -70,6 +70,7 @@ class MapPose:
                 "tracking_status": status,
                 "x_px": visual["x"],
                 "y_px": visual["y"],
+                "z_m": visual.get("z_m"),
                 "frame_age_ms": round(max(0, now - captured_at) * 1000),
                 "heading_deg": None if heading is None else round(heading, 1),
                 "heading_source": source,

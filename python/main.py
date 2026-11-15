@@ -14,20 +14,21 @@ from arduino.app_peripherals.camera import Camera
 from arduino.app_utils import App, Bridge
 from camera_color import encode_camera_frame
 from imu import Attitude
+from map_height import estimate_height
 from map_pose import MapPose
 from matching import MapMatcher, draw_projection
 
 # Optional. Edit in App Lab, then Stop and Run again.
 MAP_URL = ""
+# Set to (map SHA-256, meters per pixel, (fx, fy, cx, cy) at CAPTURE_RESOLUTION).
+HEIGHT_CALIBRATION = None
 cv.setNumThreads(2)
 CAPTURE_RESOLUTION = (1280, 960)
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 ui = WebUI()
 camera_lock = Lock()
-light_lock = Lock()
-calibration = {}
-light_state = None
 attitude = Attitude()
+shown_lander_status = None
 
 
 def decode_image(data):
@@ -164,34 +165,14 @@ def match(payload: dict):
         return JSONResponse({"error": str(error)}, status_code=422)
 
 
-def light(sample: str = ""):
-    global light_state
-    try:
-        with light_lock:
-            value = int(Bridge.call("rover_read_light"))
-            if sample in {"lit", "dark"}:
-                calibration[sample] = value
-                light_state = None
-            if len(calibration) == 2:
-                dark = calibration["dark"]
-                lit = calibration["lit"]
-                if abs(lit - dark) >= 10:
-                    midpoint = (lit + dark) / 2
-                    margin = abs(lit - dark) * 0.10
-                    signed = (value - midpoint) * (1 if lit > dark else -1)
-                    if light_state is None or abs(signed) >= margin:
-                        light_state = signed >= 0
-            Bridge.call("rover_set_light", -1 if light_state is None else int(light_state))
-            return {"raw": value, "samples": calibration.copy(), "light": light_state}
-    except Exception as error:
-        return JSONResponse({"error": str(error)}, status_code=503)
-
-
 class LiveSession:
     def __init__(self, reference, correct_colors, map_id):
         self.matcher = MapMatcher(reference, live=True)
         height, width = reference.shape[:2]
         self.map_info = {"id": map_id, "width_px": width, "height_px": height}
+        self.height_calibration = (
+            HEIGHT_CALIBRATION if HEIGHT_CALIBRATION and HEIGHT_CALIBRATION[0] == map_id else None
+        )
         self.correct_colors = correct_colors
         self.stop = Event()
         self.frame = None
@@ -214,15 +195,24 @@ class LiveSession:
             if timestamp - previous_time < 1.5:
                 result = self.track(gray, previous, points, transform, tentative, timestamp)
                 if result is not None:
-                    return result
+                    overlay, estimate = result
+                    return overlay, self.add_height(estimate, gray.shape, frame.shape)
         self.tracking = None
         overlay, estimate = self.matcher.locate(view, allow_tentative=True, include_transform=True)
-        transform = estimate.pop("transform")
+        transform = estimate["transform"]
         points = cv.goodFeaturesToTrack(gray, 180, 0.015, 9)
         if points is not None and len(points) >= 12:
             self.tracking = (timestamp, gray, points, transform, estimate["tentative"])
             self.last_fix = timestamp
-        return overlay, {**estimate, "mode": "map"}
+        return overlay, self.add_height({**estimate, "mode": "map"}, gray.shape, frame.shape)
+
+    def add_height(self, estimate, image_shape, capture_shape):
+        transform = estimate.pop("transform")
+        estimate["z_m"] = None
+        if self.height_calibration and not estimate["tentative"] and capture_shape[:2] == CAPTURE_RESOLUTION[::-1]:
+            _, meters_per_pixel, intrinsics = self.height_calibration
+            estimate["z_m"] = estimate_height(transform, meters_per_pixel, intrinsics, image_shape, capture_shape)
+        return estimate
 
     def track(self, gray, previous, points, transform, tentative, timestamp):
         moved, found, _ = cv.calcOpticalFlowPyrLK(previous, gray, points, None)
@@ -248,7 +238,6 @@ class LiveSession:
         except ValueError:
             return
         self.tracking = (timestamp, gray, tracked, mapped, tentative)
-        estimate.pop("transform")
         return overlay, {**estimate, "mode": "tracking"}
 
 
@@ -326,6 +315,7 @@ def get_map_pose():
         "tracking_status": pose["tracking_status"],
         "x_px": pose.get("x_px"),
         "y_px": pose.get("y_px"),
+        "z_m": pose.get("z_m"),
         "frame_age_ms": pose.get("frame_age_ms"),
         "heading_deg": pose.get("heading_deg"),
         "heading_source": source,
@@ -364,16 +354,36 @@ ui.expose_api("POST", "/capture", capture)
 ui.expose_api("POST", "/map", downloaded_map)
 ui.expose_api("POST", "/match", match)
 ui.expose_api("POST", "/landing", capture_landing)
-ui.expose_api("POST", "/light", light)
 
 
 def read_attitude():
+    global shown_lander_status
     sleep(0.04)
     try:
         attitude.update(Bridge.call("rover_read_imu"))
     except Exception:
         attitude.update("")
         sleep(0.5)
+
+    reading = attitude.snapshot()
+    if reading["status"] == "ready":
+        display_status = reading["lander_status"].replace("_", " ").upper()
+    elif reading["status"] in {"unavailable", "stale"}:
+        display_status = "IMU UNAVAILABLE"
+    else:
+        display_status = "CALIBRATING"
+    if display_status != shown_lander_status:
+        try:
+            Bridge.call("rover_lander_status", display_status)
+        except Exception:
+            return
+        shown_lander_status = display_status
+
+
+def arm_landing():
+    if not attitude.arm_landing():
+        return JSONResponse({"error": "Wait for the IMU to calibrate before arming."}, 409)
+    return {"lander_status": "in_air"}
 
 
 def reset_attitude():
@@ -383,4 +393,5 @@ def reset_attitude():
 
 ui.expose_api("POST", "/imu", attitude.snapshot)
 ui.expose_api("POST", "/imu/calibrate", reset_attitude)
+ui.expose_api("POST", "/lander/arm", arm_landing)
 App.run(user_loop=read_attitude)
