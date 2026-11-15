@@ -265,7 +265,7 @@ class LiveSession:
                 camera.start()
                 ready_at = monotonic() + 2
                 if not self.stop.is_set():
-                    self.matcher.prepare()
+                    Thread(target=self.prepare_map, daemon=True).start()
                 while not self.stop.is_set() and monotonic() - self.last_seen < 60:
                     frame = camera.capture()
                     if frame is not None and monotonic() >= ready_at:
@@ -280,6 +280,11 @@ class LiveSession:
         finally:
             self.stop.set()
             camera_lock.release()
+
+    def prepare_map(self):
+        with self.match_lock:
+            if not self.stop.is_set():
+                self.matcher.prepare()
 
 
 live_session = None
@@ -354,7 +359,9 @@ def live_match():
     session = active_live()
     if session is None:
         return JSONResponse({"error": "Sessione live terminata."}, 409)
-    with session.match_lock:
+    if not session.match_lock.acquire(blocking=False):
+        return {"waiting": True}
+    try:
         snapshot = session.frame
         if snapshot is None or snapshot[0] == session.last_matched:
             return {"waiting": True}
@@ -370,6 +377,8 @@ def live_match():
         except (ValueError, cv.error, np.linalg.LinAlgError) as error:
             result = {"diagnostic": str(error)}
         return {**result, "seconds": round(monotonic() - started, 2)}
+    finally:
+        session.match_lock.release()
 
 
 ui.expose_api("POST", "/live/start", start_live)
