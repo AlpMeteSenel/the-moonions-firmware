@@ -14,6 +14,7 @@ from arduino.app_peripherals.camera import Camera
 from arduino.app_utils import App, Bridge
 from camera_color import encode_camera_frame
 from imu import Attitude
+from landing_zone import LandingZone
 from map_height import estimate_height
 from map_pose import MapPose
 from matching import MapMatcher, draw_projection
@@ -192,6 +193,19 @@ class LiveSession:
         self.last_fix = 0
         self.last_map_attempt = 0
         self.pose = MapPose()
+        self.landing_zone = None
+        self.zone_reading = None
+
+    def landing_report(self):
+        if self.landing_zone is None:
+            return None
+        reading = self.zone_reading
+        if reading is None or monotonic() - reading[0] > 1.25:
+            result = {"status": "unknown", "target": None, "alternative": None,
+                      "reason": "Waiting for a fresh camera match."}
+        else:
+            result = reading[1]
+        return {**result, "area": self.landing_zone.area, "footprint": self.landing_zone.footprint}
 
     def pose_snapshot(self):
         pose = self.pose.snapshot(attitude.snapshot())
@@ -218,7 +232,7 @@ class LiveSession:
                     timestamp - self.last_fix < 5 or timestamp - self.last_map_attempt < 2
                 ):
                     overlay, estimate = tracked
-                    return overlay, self.add_height(estimate, gray.shape, frame.shape)
+                    return overlay, self.finish_match(estimate, view, frame.shape, timestamp)
         self.last_map_attempt = timestamp
         try:
             overlay, estimate = self.matcher.locate(view, allow_tentative=True, include_transform=True)
@@ -226,17 +240,31 @@ class LiveSession:
             if tracked is None or tracked[1]["tentative"]:
                 raise
             overlay, estimate = tracked
-            return overlay, self.add_height(estimate, gray.shape, frame.shape)
+            return overlay, self.finish_match(estimate, view, frame.shape, timestamp)
         if estimate["tentative"] and tracked is not None and not tracked[1]["tentative"]:
             overlay, estimate = tracked
-            return overlay, self.add_height(estimate, gray.shape, frame.shape)
+            return overlay, self.finish_match(estimate, view, frame.shape, timestamp)
         self.tracking = None
         transform = estimate["transform"]
+        if not estimate["tentative"]:
+            self.last_fix = timestamp
         points = cv.goodFeaturesToTrack(gray, 180, 0.01, 7)
         if points is not None and len(points) >= 12:
             self.tracking = (timestamp, gray, points, transform, estimate["tentative"])
             self.last_fix = timestamp
-        return overlay, self.add_height({**estimate, "mode": "map"}, gray.shape, frame.shape)
+        return overlay, self.finish_match({**estimate, "mode": "map"}, view, frame.shape, timestamp)
+
+    def finish_match(self, estimate, view, capture_shape, timestamp):
+        if self.landing_zone is not None and not estimate["tentative"] and timestamp - self.last_fix < 5:
+            result = self.landing_zone.inspect(
+                view, estimate["transform"],
+                estimate["x"] / self.map_info["width_px"],
+                estimate["y"] / self.map_info["height_px"],
+            )
+            self.zone_reading = (timestamp, result)
+        else:
+            self.zone_reading = None
+        return self.add_height(estimate, view.shape, capture_shape)
 
     def add_height(self, estimate, image_shape, capture_shape):
         transform = estimate.pop("transform")
@@ -319,11 +347,14 @@ def start_live(payload: dict, correct_colors: bool = True):
     try:
         map_bytes = base64.b64decode(payload["map"], validate=True)
         reference = decode_image(map_bytes)
+        zone_settings = payload.get("landing_zone")
+        landing_zone = LandingZone(reference, zone_settings) if zone_settings is not None else None
     except (ValueError, KeyError, TypeError, cv.error) as error:
         return JSONResponse({"error": str(error)}, 422)
     if not camera_lock.acquire(blocking=False):
         return JSONResponse({"error": "La camera ? occupata."}, 409)
     live_session = LiveSession(reference, correct_colors, sha256(map_bytes).hexdigest())
+    live_session.landing_zone = landing_zone
     Thread(target=live_session.run, daemon=True).start()
     return {"started": True}
 
@@ -350,6 +381,7 @@ def live_preview():
     return {
         "frame": jpeg_url(snapshot[1]) if snapshot else None,
         "pose": session.pose_snapshot(),
+        "landing_zone": session.landing_report(),
     }
 
 
@@ -377,6 +409,7 @@ def get_map_pose():
     uses_imu = source == "camera_imu" or height_source in {"imu", "last_imu"}
     return JSONResponse({
         "map": session.map_info if active else None,
+        "landing_zone": session.landing_report() if active else None,
         "tracking_status": pose["tracking_status"],
         "x_px": pose.get("x_px"),
         "y_px": pose.get("y_px"),
@@ -414,6 +447,7 @@ def live_match():
                 raise ValueError("Impossibile creare la mappa del risultato.")
             result = {**estimate, "overlay": jpeg_url(jpeg.tobytes())}
         except (ValueError, cv.error, np.linalg.LinAlgError) as error:
+            session.zone_reading = None
             result = {"diagnostic": str(error)}
         return {**result, "seconds": round(monotonic() - started, 2)}
     finally:

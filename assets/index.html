@@ -24,6 +24,13 @@ img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-
 .rover-heading{position:absolute;inset:0;border-radius:50%}
 .rover-heading::before{content:"";position:absolute;top:-15px;left:50%;transform:translateX(-50%);
     border:7px solid transparent;border-bottom:13px solid currentColor;border-top:0;filter:drop-shadow(0 1px 1px #000)}
+.landing-area,.landing-target,.landing-alternative{position:absolute;box-sizing:border-box;pointer-events:none}
+.landing-area{border:1px dashed #a4e7ce}
+.landing-target,.landing-alternative{aspect-ratio:1;border-radius:50%;transform:translate(-50%,-50%)}
+.landing-target{border:2px solid #ffd086}
+.landing-target[data-state="blocked"]{border-color:#ff8585}
+.landing-target[data-state="clear"]{border-color:#a4e7ce}
+.landing-alternative{border:2px dashed #a4e7ce;background:#25af9133}
 [hidden]{display:none!important}
 @media(max-width:670px){.nav-grid{grid-template-columns:minmax(0,1fr)}}
 </style>
@@ -38,6 +45,11 @@ img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-
 <button id="match">Find position on map</button>
 <button id="landing">Run landing test (5 s capture)</button>
 <button id="live">Start live tracking</button>
+<button id="chooseLandingArea" type="button">Mark clear landing area</button>
+<label>Landing footprint (% of full map width)
+  <input id="landingFootprint" type="number" min="2" max="50" step="0.1" value="12">
+</label>
+<output id="landingSetup" aria-live="polite"></output>
 <output id="visionStatus" aria-live="polite"></output>
 <img id="framePreview" alt="Latest camera frame">
 <img id="mapPreview" alt="Reference map with the matched camera outline">
@@ -46,11 +58,15 @@ img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-
     <h3>Rover position</h3>
     <output id="poseStatus" class="nav-status">Waiting for the camera…</output>
     <output id="heightStatus" class="nav-status">Height · Waiting for a pose</output>
+    <output id="landingStatus" class="nav-status" aria-live="polite" hidden></output>
     <label>Measured starting height (m) <input id="initialHeight" type="number" min="0.001" step="any" placeholder="0.75"></label>
     <button id="setHeight">Set IMU starting height</button>
     <output id="heightSetupStatus" class="nav-status" aria-live="polite"></output>
     <div class="nav-stage">
       <img id="navMap" alt="Reference map">
+      <div id="landingArea" class="landing-area" hidden></div>
+      <div id="landingTarget" class="landing-target" hidden></div>
+      <div id="landingAlternative" class="landing-alternative" hidden></div>
       <div id="roverPoint" class="rover-point" hidden><span id="roverHeading" class="rover-heading"></span></div>
     </div>
   </div>
@@ -72,6 +88,9 @@ const get = id => document.getElementById(id);
 let reference, frame;
 let visionBusy = false;
 let liveActive = false;
+let landingArea;
+let landingCorner;
+let choosingLandingArea = false;
 const CAMERA_WAIT_MS = 12000;
 const CAMERA_UNAVAILABLE = "The Uno Q camera did not respond. Check whether another app is using it.";
 const diagnosticTranslations = [
@@ -135,7 +154,8 @@ function readPhoto(file) {
 async function vision(action, busyMessage = "Processing…") {
     if (visionBusy) return;
     visionBusy = true;
-    const controls = ["mapFile", "frameFile", "download", "capture", "match", "landing", "correctColors", "live"].map(get);
+    const controls = ["mapFile", "frameFile", "download", "capture", "match", "landing", "correctColors", "live",
+        "chooseLandingArea", "landingFootprint"].map(get);
     controls.forEach(control => control.disabled = true);
     get("visionStatus").textContent = busyMessage;
     try {
@@ -150,9 +170,36 @@ async function vision(action, busyMessage = "Processing…") {
 }
 function showMap(image) {
     reference = image;
+    landingArea = landingCorner = undefined;
+    choosingLandingArea = false;
+    get("landingSetup").textContent = "";
     get("mapPreview").src = image;
     return "Reference map ready.";
 }
+get("chooseLandingArea").onclick = () => {
+    if (!reference) {
+        get("landingSetup").textContent = "Load a reference map first.";
+        return;
+    }
+    get("mapPreview").src = reference;
+    landingCorner = undefined;
+    choosingLandingArea = true;
+    get("landingSetup").textContent = "Click one corner of the clear area on the map.";
+};
+get("mapPreview").onclick = event => {
+    if (!choosingLandingArea || visionBusy) return;
+    const box = get("mapPreview").getBoundingClientRect();
+    const point = [(event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height];
+    if (!landingCorner) {
+        landingCorner = point;
+        get("landingSetup").textContent = "Click the opposite corner.";
+        return;
+    }
+    const [x, y] = landingCorner;
+    landingArea = [Math.min(x, point[0]), Math.min(y, point[1]), Math.max(x, point[0]), Math.max(y, point[1])];
+    choosingLandingArea = false;
+    get("landingSetup").textContent = "Clear reference area marked.";
+};
 function showFrame(image) {
     frame = image;
     get("framePreview").src = image;
@@ -198,6 +245,33 @@ get("landing").onclick = () => vision(async () => {
     return "Center: " + result.x + ", " + result.y + " px. Heading: " + result.angle + "°. " + counts;
 });
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+function showLandingZone(zone) {
+    const status = get("landingStatus");
+    const area = get("landingArea");
+    status.hidden = area.hidden = !zone;
+    for (const [id, point] of [["landingTarget", zone?.target], ["landingAlternative", zone?.alternative]]) {
+        const marker = get(id);
+        marker.hidden = !point;
+        if (point) {
+            marker.dataset.state = zone.status;
+            marker.style.left = 100 * point.x_norm + "%";
+            marker.style.top = 100 * point.y_norm + "%";
+            marker.style.width = 100 * zone.footprint + "%";
+        }
+    }
+    if (!zone) return;
+    const [left, top, right, bottom] = zone.area;
+    area.style.left = 100 * left + "%";
+    area.style.top = 100 * top + "%";
+    area.style.width = 100 * (right - left) + "%";
+    area.style.height = 100 * (bottom - top) + "%";
+    status.textContent = {
+        unknown: "Landing zone unverified · " + zone.reason,
+        clear: "No obstacle detected in the landing footprint",
+        blocked: zone.alternative ? "Landing zone blocked · Alternative marked on map" :
+            "Landing zone blocked · No visible alternative"
+    }[zone.status];
+}
 function showPose(pose) {
     const marker = get("roverPoint");
     const heading = get("roverHeading");
@@ -262,6 +336,7 @@ async function livePreview() {
         const result = await post("/live/preview");
         if (!liveActive) return;
         showPose(result.pose);
+        showLandingZone(result.landing_zone);
         if (result.frame) {
             receivedFrame = true;
             frame = result.frame;
@@ -295,8 +370,11 @@ get("live").onclick = () => {
     }
     vision(async () => {
         if (!reference) throw new Error("Upload a reference map first.");
-        await post("/live/start?correct_colors=" + get("correctColors").checked,
-            {map: reference.split(",")[1]});
+        const payload = {map: reference.split(",")[1]};
+        if (landingArea) {
+            payload.landing_zone = {area: landingArea, footprint: get("landingFootprint").valueAsNumber / 100};
+        }
+        await post("/live/start?correct_colors=" + get("correctColors").checked, payload);
         liveActive = true;
         get("mapPreview").src = reference;
         get("navMap").src = reference;
@@ -305,6 +383,7 @@ get("live").onclick = () => {
         get("heightSetupStatus").textContent = "";
         get("framePreview").hidden = get("mapPreview").hidden = true;
         showPose(null);
+        showLandingZone(null);
         get("live").textContent = "Stop live tracking";
         get("live").disabled = false;
         get("visionStatus").textContent = "";

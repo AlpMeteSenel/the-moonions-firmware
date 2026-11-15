@@ -156,3 +156,30 @@ Verify the scale against a second known height before relying on the measurement
 Live X/Y tracking refreshes its feature points as the camera moves. It
 tries to re-match the full map periodically and can keep a geometrically
 consistent track for up to 12 seconds after the last map match.
+
+## Bench obstacle check
+
+1. Take the reference photo with the intended tabletop landing area clear.
+   Leave the landmarks around it in place so the camera can match the map.
+2. Load the reference photo and click **Mark clear landing area**. Click two
+   opposite corners of the clear area in the map preview.
+3. Set **Landing footprint** to the diameter of the lander and its desired
+   margin, as a percentage of the full map width. For example, a 10 cm
+   footprint over a 70 cm wide reference is about 14%.
+4. Start live tracking, point the camera over the marked area, and put an
+   object underneath it. A red outline means blocked. A dashed circle inside
+   the marked area suggests the nearest fully visible alternative with enough
+   clearance. An unverified result means the footprint could not be checked.
+
+The check compares the registered camera view with the clear reference.
+It can detect a new object that changes the appearance of the surface.
+Shadows, severe lighting changes, and objects with little visual contrast
+can affect it. The suggested site is a candidate for the bench test.
+
+To enable the check via API, supply
+`"landing_zone": {"area": [0.3, 0.2, 0.8, 0.75], "footprint": 0.14}`
+in `POST /live/start`. The normalized rectangle is left, top, right, bottom.
+`GET /api/pose` then includes a `landing_zone` object with `status`
+(`clear`, `blocked`, or `unknown`), the marked `area`, the
+`footprint`, and `target` and `alternative` points in normalized map
+coordinates. Either point can be null. The field is null when the check is off.
