@@ -32,7 +32,7 @@ class MapPose:
                                      wrap_angle(visual["angle"] - heading))
             else:
                 heading = visual["angle"]
-            anchor = (imu["epoch"], imu["yaw"]) if imu["status"] == "ready" else None
+            anchor = (imu["epoch"], imu["yaw"], imu["sampled_at"]) if imu["status"] == "ready" else None
             self.fix = (captured_at, visual, heading, anchor)
             self.tentative = None
 
@@ -42,7 +42,8 @@ class MapPose:
         _, _, heading, anchor = self.fix
         if anchor and imu["status"] == "ready" and imu["epoch"] == anchor[0]:
             yaw_delta = wrap_angle(imu["yaw"] - anchor[1])
-            return wrap_angle(heading + IMU_TO_MAP_YAW * yaw_delta), "camera_imu"
+            if imu["sampled_at"] > anchor[2]:
+                return wrap_angle(heading + IMU_TO_MAP_YAW * yaw_delta), "camera_imu"
         if now - self.fix[0] <= FRESH_SECONDS:
             return heading, "camera"
         return None, None

@@ -1,5 +1,6 @@
 import base64
 import math
+from hashlib import sha256
 from threading import Event, Lock, Thread
 from time import monotonic, sleep
 from urllib.request import urlopen
@@ -187,8 +188,10 @@ def light(sample: str = ""):
 
 
 class LiveSession:
-    def __init__(self, reference, correct_colors):
+    def __init__(self, reference, correct_colors, map_id):
         self.matcher = MapMatcher(reference, live=True)
+        height, width = reference.shape[:2]
+        self.map_info = {"id": map_id, "width_px": width, "height_px": height}
         self.correct_colors = correct_colors
         self.stop = Event()
         self.frame = None
@@ -277,12 +280,13 @@ live_session = None
 def start_live(payload: dict, correct_colors: bool = True):
     global live_session
     try:
-        reference = decode_image(base64.b64decode(payload["map"], validate=True))
+        map_bytes = base64.b64decode(payload["map"], validate=True)
+        reference = decode_image(map_bytes)
     except (ValueError, KeyError, TypeError, cv.error) as error:
         return JSONResponse({"error": str(error)}, 422)
     if not camera_lock.acquire(blocking=False):
         return JSONResponse({"error": "La camera ? occupata."}, 409)
-    live_session = LiveSession(reference, correct_colors)
+    live_session = LiveSession(reference, correct_colors, sha256(map_bytes).hexdigest())
     Thread(target=live_session.run, daemon=True).start()
     return {"started": True}
 
@@ -312,6 +316,23 @@ def live_preview():
     }
 
 
+def get_map_pose():
+    session = live_session
+    active = session is not None and not session.stop.is_set()
+    pose = session.pose.snapshot(attitude.snapshot()) if active else {"tracking_status": "inactive"}
+    source = pose.get("heading_source")
+    return JSONResponse({
+        "map": session.map_info if active else None,
+        "tracking_status": pose["tracking_status"],
+        "x_px": pose.get("x_px"),
+        "y_px": pose.get("y_px"),
+        "frame_age_ms": pose.get("frame_age_ms"),
+        "heading_deg": pose.get("heading_deg"),
+        "heading_source": source,
+        "imu_estimated": None if source is None else int(source == "camera_imu"),
+    }, headers={"Cache-Control": "no-store"})
+
+
 def live_match():
     session = active_live()
     if session is None:
@@ -338,6 +359,7 @@ ui.expose_api("POST", "/live/start", start_live)
 ui.expose_api("POST", "/live/stop", end_live)
 ui.expose_api("POST", "/live/preview", live_preview)
 ui.expose_api("POST", "/live/match", live_match)
+ui.expose_api("GET", "/api/pose", get_map_pose)
 ui.expose_api("POST", "/capture", capture)
 ui.expose_api("POST", "/map", downloaded_map)
 ui.expose_api("POST", "/match", match)

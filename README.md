@@ -67,3 +67,39 @@ latest camera position in map pixels. Camera fixes anchor heading, and fresh
 IMU yaw can update it for up to three seconds after a fix. A position older
 than 1.25 seconds is labeled **Last known position**. The timing readout
 shows the processing time for the latest map match or optical flow update.
+
+## Pose API
+
+Keep **Start live tracking** running in Rover Luna with the same reference image
+used by the map website. Poll `GET http://<uno-q-ip>:7000/api/pose` from the
+website or its backend. Polling twice per second is a starting point. For a
+website served over HTTPS, use an HTTPS backend or proxy that can reach the
+UNO Q on the local network.
+
+Example response:
+
+```json
+{
+  "map": {"id": "<sha256-of-reference-image-bytes>", "width_px": 1280, "height_px": 960},
+  "tracking_status": "stale",
+  "x_px": 924.8,
+  "y_px": 423.6,
+  "frame_age_ms": 1650,
+  "heading_deg": 10.3,
+  "heading_source": "camera_imu",
+  "imu_estimated": 1
+}
+```
+
+- Coordinates use the reference image's top-left origin. X increases to the
+  right and Y down. For a scaled display, use x_px / width_px and
+  y_px / height_px as the marker proportions. Heading is clockwise from image-up.
+- imu_estimated is 0 for a camera-anchored heading, 1 when a newer IMU
+  sample propagates heading from the last camera anchor, and null when
+  heading is unavailable. Position always comes from the camera.
+- tracking_status is valid for a fresh visual pose, tentative for a
+  low-confidence visual pose, stale for the last known visual position,
+  waiting before the first usable pose, or inactive when live tracking is off.
+  Use this field to style or hide the marker independently of imu_estimated.
+- map.id hashes the exact image bytes supplied to live tracking. map is
+  null while inactive. Position fields are null while inactive or waiting.

@@ -74,6 +74,7 @@ class Attitude:
             self.result = {
                 "status": "ready",
                 "epoch": self.epoch,
+                "sampled_at": self.sampled_at,
                 "roll": round(math.degrees(math.atan2(r[2, 1], r[2, 2])), 1),
                 "pitch": round(math.degrees(math.atan2(-r[2, 0], math.hypot(r[2, 1], r[2, 2]))), 1),
                 "yaw": round(math.degrees(math.atan2(r[1, 0], r[0, 0])), 1),
