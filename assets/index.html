@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rover Luna</title>
@@ -10,31 +10,61 @@ h1,h2{margin-top:0} label{display:block;margin:12px 0} button,input{font:inherit
 button{padding:8px 12px;margin:4px;border:0;border-radius:6px;background:#a4e7ce;color:#102820;cursor:pointer}
 button:disabled{opacity:.5} img{display:block;max-width:100%;max-height:520px;margin-top:12px}
 img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-wrap}
+.nav-grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px;margin-top:14px}
+.nav-view{min-width:0;background:#10181f;border:1px solid #3b5661;border-radius:10px;padding:12px}
+.nav-view h3{margin:0 0 8px;font-size:.9rem}
+.nav-status{margin:0 0 9px;font:600 .8rem system-ui,sans-serif;color:#b9d3dd}
+.nav-status[data-state="valid"]{color:#a4e7ce}
+.nav-status[data-state="stale"],.nav-status[data-state="tentative"]{color:#ffd086}
+.nav-stage{position:relative;width:fit-content;max-width:100%;margin:auto}
+.nav-stage img,.nav-view>img{margin:0 auto;border-radius:5px}
+.rover-point{position:absolute;transform:translate(-50%,-50%);width:19px;height:19px;border:2px solid #fff;
+    border-radius:50%;background:#25af91;color:#d0fff3;box-shadow:0 0 0 5px #0b2d2bd9;pointer-events:none}
+.rover-point[data-state="stale"],.rover-point[data-state="tentative"]{background:#b27931;color:#ffe2a8;box-shadow:0 0 0 5px #38250ad9}
+.rover-heading{position:absolute;inset:0;border-radius:50%}
+.rover-heading::before{content:"";position:absolute;top:-15px;left:50%;transform:translateX(-50%);
+    border:7px solid transparent;border-bottom:13px solid currentColor;border-top:0;filter:drop-shadow(0 1px 1px #000)}
+[hidden]{display:none!important}
+@media(max-width:670px){.nav-grid{grid-template-columns:minmax(0,1fr)}}
 </style>
 <h1>Rover Luna</h1>
 <section>
-<h2>Mappa e fotogramma</h2>
-<label>Mappa di riferimento <input id="mapFile" type="file" accept="image/jpeg,image/png"></label>
-<button id="download">Scarica la mappa dal PC</button>
-<label>Fotogramma da file <input id="frameFile" type="file" accept="image/jpeg,image/png"></label>
-<label><input id="correctColors" type="checkbox" checked> Correggi i colori della camera</label>
-<button id="capture">Scatta con Arduino</button>
-<button id="match">Localizza sulla mappa</button>
-<button id="landing">Prova atterraggio (5 s)</button>
-<button id="live">Avvia localizzazione live</button>
+<h2>Map and camera</h2>
+<label>Reference map <input id="mapFile" type="file" accept="image/jpeg,image/png"></label>
+<button id="download">Download reference map</button>
+<label>Upload camera frame <input id="frameFile" type="file" accept="image/jpeg,image/png"></label>
+<label><input id="correctColors" type="checkbox" checked> Correct camera colors</label>
+<button id="capture">Take photo</button>
+<button id="match">Find position on map</button>
+<button id="landing">Run landing test (5 s capture)</button>
+<button id="live">Start live tracking</button>
 <output id="visionStatus" aria-live="polite"></output>
-<img id="framePreview" alt="Ultimo fotogramma">
-<img id="mapPreview" alt="Mappa di riferimento con il contorno riconosciuto">
+<img id="framePreview" alt="Latest camera frame">
+<img id="mapPreview" alt="Reference map with the matched camera outline">
+<div id="liveNavigation" class="nav-grid" hidden>
+  <div class="nav-view">
+    <h3>Rover position</h3>
+    <output id="poseStatus" class="nav-status">Waiting for the camera…</output>
+    <div class="nav-stage">
+      <img id="navMap" alt="Reference map">
+      <div id="roverPoint" class="rover-point" hidden><span id="roverHeading" class="rover-heading"></span></div>
+    </div>
+  </div>
+  <div class="nav-view">
+    <h3>Rover camera</h3>
+    <img id="navFrame" alt="Latest rover camera frame">
+  </div>
+</div>
 </section>
 <section>
-<h2>Sensore A0</h2>
-<button id="dark">Registra al buio</button>
-<button id="lit">Registra con luce</button>
-<output id="lightStatus" aria-live="polite">Attendo la prima lettura…</output>
+<h2>A0 light sensor</h2>
+<button id="dark">Calibrate in darkness</button>
+<button id="lit">Calibrate in light</button>
+<output id="lightStatus" aria-live="polite">Waiting for the first reading…</output>
 </section>
 <section>
 <h2>Modulino Movement</h2>
-<button id="calibrateImu">Calibra IMU a rover fermo</button>
+<button id="calibrateImu">Calibrate IMU while stationary</button>
 <output id="imuStatus" aria-live="polite"></output>
 </section>
 <script>
@@ -43,31 +73,72 @@ let reference, frame;
 let visionBusy = false;
 let liveActive = false;
 let lightBusy = false;
+const CAMERA_WAIT_MS = 12000;
+const CAMERA_UNAVAILABLE = "The Uno Q camera did not respond. Check whether another app is using it.";
+const diagnosticTranslations = [
+    ["Usa una foto JPG o PNG entro 12 MB.", "Use a JPG or PNG image up to 12 MB."],
+    ["Immagine illeggibile. Usa JPG o PNG.", "Could not decode the image. Use JPG or PNG."],
+    [/La camera non ha restituito (?:un fotogramma|fotogrammi)\./, "The camera returned no frames."],
+    ["Imposta MAP_URL in python/main.py, oppure carica una foto.", "Set MAP_URL in python/main.py or upload a reference image."],
+    [/Impossibile creare (?:la mappa|l'immagine) del risultato\./, "Could not create the result image."],
+    ["Impossibile ricodificare la mappa.", "Could not encode the reference map."],
+    ["Impossibile codificare il fotogramma della camera.", "Could not encode the camera frame."],
+    ["Sessione live terminata.", "Live tracking session ended."],
+    ["Contrasto locale:", "Enhanced contrast:"],
+    ["Dettagli insufficienti.", "Too little image detail."],
+    [/Punti rilevati: fotogramma (\d+), mappa (\d+)\./g, "Detected features: $1 in the frame, $2 in the map."],
+    [/Solo (\d+\/\d+) corrispondenze distinte\./g, "Only $1 distinct matches."],
+    ["Nessuna trasformazione coerente.", "Could not find a consistent match."],
+    [/Match incerto \((\d+\/\d+) punti coerenti\)\./g, "Uncertain match ($1 inliers)."],
+    ["Proiezione non valida.", "Invalid projection."],
+    ["Il contorno stimato non è plausibile.", "The projected camera outline is implausible."],
+    ["Il centro stimato è fuori dalla mappa.", "The projected position is outside the reference map."],
+];
+
+function englishDiagnostic(message) {
+    if (typeof message !== "string") return "";
+    if (/La camera .? ?occupata\.|Failed to open camera|Device or resource busy/i.test(message)) return CAMERA_UNAVAILABLE;
+    for (const [from, to] of diagnosticTranslations) {
+        message = typeof from === "string" ? message.replaceAll(from, to) : message.replace(from, to);
+    }
+    return message;
+}
+
 async function post(path, data) {
-    const response = await fetch(path, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: data === undefined ? undefined : JSON.stringify(data)
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Errore HTTP " + response.status);
-    return result;
+    const onCamera = /^\/(?:capture|landing|live\/)/.test(path);
+    const signal = AbortSignal.timeout(path.startsWith("/landing") ? 25000 : CAMERA_WAIT_MS);
+    try {
+        const response = await fetch(path, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: data === undefined ? undefined : JSON.stringify(data),
+            signal,
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(englishDiagnostic(result.error) || "HTTP error " + response.status);
+        return result;
+    } catch (error) {
+        if (signal.aborted) {
+            throw new Error(onCamera ? CAMERA_UNAVAILABLE : "The Uno Q did not respond. Try again.");
+        }
+        throw error;
+    }
 }
 function readPhoto(file) {
     return new Promise((resolve, reject) => {
-        if (file.size > 12 * 1024 * 1024) return reject(new Error("La foto supera 12 MB."));
+        if (file.size > 12 * 1024 * 1024) return reject(new Error("The image exceeds 12 MB."));
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error("Impossibile leggere la foto."));
+        reader.onerror = () => reject(new Error("Could not read the image."));
         reader.readAsDataURL(file);
     });
 }
-async function vision(action) {
+async function vision(action, busyMessage = "Processing…") {
     if (visionBusy) return;
     visionBusy = true;
     const controls = ["mapFile", "frameFile", "download", "capture", "match", "landing", "correctColors", "live"].map(get);
     controls.forEach(control => control.disabled = true);
-    get("visionStatus").textContent = "Elaborazione…";
+    get("visionStatus").textContent = busyMessage;
     try {
         get("visionStatus").textContent = await action();
     } catch (error) {
@@ -81,13 +152,13 @@ async function vision(action) {
 function showMap(image) {
     reference = image;
     get("mapPreview").src = image;
-    return "Mappa pronta.";
+    return "Reference map ready.";
 }
 function showFrame(image) {
     frame = image;
     get("framePreview").src = image;
     if (reference) get("mapPreview").src = reference;
-    return "Fotogramma pronto.";
+    return "Camera frame ready.";
 }
 get("mapFile").onchange = event => {
     const file = event.target.files[0];
@@ -97,63 +168,92 @@ get("frameFile").onchange = event => {
     const file = event.target.files[0];
     if (file) vision(async () => showFrame(await readPhoto(file)));
 };
-get("capture").onclick = () => vision(async () => showFrame((await post("/capture?correct_colors=" + get("correctColors").checked)).frame));
+get("capture").onclick = () => vision(async () => {
+    const result = await post("/capture?correct_colors=" + get("correctColors").checked);
+    return showFrame(result.frame);
+}, "Opening the camera and taking a photo…");
 get("download").onclick = () => vision(async () => showMap((await post("/map")).map));
 get("match").onclick = () => vision(async () => {
-    if (!reference || !frame) throw new Error("Scegli una mappa e acquisisci un fotogramma.");
+    if (!reference || !frame) throw new Error("Choose a reference map and capture or upload a camera frame.");
     const result = await post("/match", {map: reference.split(",")[1], frame: frame.split(",")[1]});
     get("mapPreview").src = result.overlay;
-    return (result.tentative ? "Stima indicativa (da confermare). Centro: " : "Centro sulla mappa: ") + result.x + ", " + result.y + " px · Direzione nella foto: " +
-        result.angle + "° · Punti coerenti: " + result.inliers + "/" + result.matches;
+    return (result.tentative ? "Tentative position. Center: " : "Position on map: ") + result.x + ", " + result.y + " px · Camera heading: " +
+        result.angle + "° · Matching inliers: " + result.inliers + "/" + result.matches;
 });
 get("landing").onclick = () => vision(async () => {
-    if (!reference) throw new Error("Carica prima la mappa.");
-    get("visionStatus").textContent = "Acquisizione: simula la discesa e tieni ferma la camera negli ultimi 2 secondi.";
+    if (!reference) throw new Error("Upload a reference map first.");
+    get("visionStatus").textContent = "Capturing descent. Hold the camera still for the final two seconds.";
     get("mapPreview").src = reference;
     const result = await post("/landing?correct_colors=" + get("correctColors").checked, {map: reference.split(",")[1]});
     showFrame(result.frame);
-    const counts = result.valid + " match finali validi su " + result.total + " fotogrammi acquisiti.";
+    const counts = result.valid + " valid late matches from " + result.total + " captured frames.";
     if (!result.confirmed && !result.overlay) {
-        return ["Nessuna proiezione plausibile. " + counts, ...result.diagnostics].join("\n");
+        return ["No reliable position estimate. " + counts, ...(result.diagnostics ?? []).map(englishDiagnostic)].join("\n");
     }
     if (!result.confirmed) {
         get("mapPreview").src = result.overlay;
-        return "Stima indicativa a " + result.timestamp + " s. Centro: " + result.x + ", " +
-            result.y + " px. Punti coerenti: " + result.inliers + "/" + result.matches + ".";
+        return "Tentative position at " + result.timestamp + " s. Center: " + result.x + ", " +
+            result.y + " px. Matching inliers: " + result.inliers + "/" + result.matches + ".";
     }
     get("mapPreview").src = result.overlay;
-    return "Centro: " + result.x + ", " + result.y + " px. Direzione: " + result.angle + "?. " + counts;
+    return "Center: " + result.x + ", " + result.y + " px. Heading: " + result.angle + "°. " + counts;
 });
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+function showPose(pose) {
+    const marker = get("roverPoint");
+    const heading = get("roverHeading");
+    const status = get("poseStatus");
+    const state = pose?.tracking_status ?? "waiting";
+    status.dataset.state = marker.dataset.state = state;
+    const map = get("navMap");
+    marker.hidden = state === "waiting" || !map.naturalWidth;
+    if (marker.hidden) {
+        status.textContent = "Waiting for a camera position…";
+        return;
+    }
+    marker.style.left = 100 * pose.x_px / map.naturalWidth + "%";
+    marker.style.top = 100 * pose.y_px / map.naturalHeight + "%";
+    heading.hidden = pose.heading_deg === null;
+    heading.style.transform = heading.hidden ? "" : "rotate(" + pose.heading_deg + "deg)";
+    const label = {
+        valid: "Live position",
+        tentative: "Tentative position",
+        stale: "Last known position"
+    }[state];
+    const source = pose.heading_source === "camera_imu" ?
+        (state === "stale" ? "IMU heading" : "Camera + IMU heading") : "Camera heading";
+    status.textContent = label + " · " + pose.x_px + ", " + pose.y_px + " px" +
+        (state === "stale" ? " · " + (pose.frame_age_ms / 1000).toFixed(1) + " s ago" : "") +
+        (heading.hidden ? "" : " · " + source + " " + pose.heading_deg + "°");
+}
 async function livePreview() {
+    const start = performance.now();
+    let receivedFrame = false;
     while (liveActive) {
         const result = await post("/live/preview");
-        if (liveActive && result.frame) {
+        if (!liveActive) return;
+        showPose(result.pose);
+        if (result.frame) {
+            receivedFrame = true;
             frame = result.frame;
             get("framePreview").src = frame;
+            get("navFrame").src = frame;
+        } else if (!receivedFrame && performance.now() - start >= CAMERA_WAIT_MS) {
+            throw new Error(CAMERA_UNAVAILABLE);
         }
         await pause(180);
     }
 }
 async function livePosition() {
-    let lastFix;
     while (liveActive) {
         const result = await post("/live/match");
         if (!liveActive) return;
         if (result.overlay) {
-            lastFix = performance.now();
             get("mapPreview").src = result.overlay;
-            get("visionStatus").textContent =
-                (result.tentative ? "Stima indicativa" : "Posizione live") +
-                " ? Centro: " + result.x + ", " + result.y + " px ? Direzione: " +
-                result.angle + "? ? Punti: " + result.inliers + "/" + result.matches +
-                " ? " + (result.mode === "tracking" ? "Tracciamento" : "Confronto mappa") +
-                ": " + result.seconds + " s";
+            const method = result.mode === "tracking" ? "Optical flow" : "Map match";
+            get("visionStatus").textContent = method + " · " + result.seconds + " s";
         } else if (!result.waiting) {
-            const previous = lastFix ? " ? Ultima stima: " +
-                ((performance.now() - lastFix) / 1000).toFixed(1) + " s fa" : "";
-            get("visionStatus").textContent = "Nessuna stima per il fotogramma corrente" +
-                previous + " ? Calcolo: " + result.seconds + " s. " + result.diagnostic;
+            get("visionStatus").textContent = englishDiagnostic(result.diagnostic);
         }
         await pause(250);
     }
@@ -165,20 +265,27 @@ get("live").onclick = () => {
         return;
     }
     vision(async () => {
-        if (!reference) throw new Error("Carica prima la mappa.");
+        if (!reference) throw new Error("Upload a reference map first.");
         await post("/live/start?correct_colors=" + get("correctColors").checked,
             {map: reference.split(",")[1]});
         liveActive = true;
         get("mapPreview").src = reference;
-        get("live").textContent = "Ferma live";
+        get("navMap").src = reference;
+        get("navFrame").removeAttribute("src");
+        get("liveNavigation").hidden = false;
+        get("framePreview").hidden = get("mapPreview").hidden = true;
+        showPose(null);
+        get("live").textContent = "Stop live tracking";
         get("live").disabled = false;
-        get("visionStatus").textContent = "Avvio camera e ricerca posizione?";
+        get("visionStatus").textContent = "";
         try {
             await Promise.race([livePreview(), livePosition()]);
-            return "Localizzazione live terminata.";
+            return "Live tracking stopped.";
         } finally {
             liveActive = false;
-            get("live").textContent = "Avvia localizzazione live";
+            get("live").textContent = "Start live tracking";
+            get("liveNavigation").hidden = true;
+            get("framePreview").hidden = get("mapPreview").hidden = false;
             await post("/live/stop");
         }
     });
@@ -192,9 +299,9 @@ async function sampleLight(sample) {
     get("dark").disabled = get("lit").disabled = true;
     try {
         const result = await post("/light" + (sample ? "?sample=" + sample : ""));
-        const state = result.light === null ? "Da calibrare" : result.light ? "LUCE" : "BUIO";
+        const state = result.light === null ? "Calibration needed" : result.light ? "Light" : "Dark";
         get("lightStatus").textContent = state + " · ADC " + result.raw +
-            " · Buio " + (result.samples.dark ?? "—") + " · Luce " + (result.samples.lit ?? "—");
+            " · Dark " + (result.samples.dark ?? "—") + " · Light " + (result.samples.lit ?? "—");
     } catch (error) {
         get("lightStatus").textContent = error.message;
     } finally {
@@ -208,10 +315,11 @@ async function refreshImu() {
     try {
         const result = await post("/imu");
         const status = result.status === "ready" ?
-            "Roll " + result.roll + "? ? Pitch " + result.pitch + "? ? Yaw relativo " +
-            result.yaw + "? ? Accelerazione " + result.acceleration + " m/s?" :
-            result.status === "unavailable" ? "IMU non rilevata sulla porta Qwiic." :
-            "Tieni fermo il rover per calibrare l'IMU (" + (result.samples || 0) + "/40).";
+            "Roll " + result.roll + "° · Pitch " + result.pitch + "° · Relative yaw " +
+            result.yaw + "° · Acceleration " + result.acceleration + " m/s²" :
+            result.status === "unavailable" ? "IMU unavailable on the Qwiic port." :
+            result.status === "stale" ? "IMU readings are stale." :
+            "Keep the rover still while the IMU calibrates (" + (result.samples || 0) + "/40).";
         get("imuStatus").textContent = status;
     } catch (error) {
         get("imuStatus").textContent = error.message;

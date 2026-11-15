@@ -13,6 +13,7 @@ from arduino.app_peripherals.camera import Camera
 from arduino.app_utils import App, Bridge
 from camera_color import encode_camera_frame
 from imu import Attitude
+from map_pose import MapPose
 from matching import MapMatcher, draw_projection
 
 # Optional. Edit in App Lab, then Stop and Run again.
@@ -25,6 +26,7 @@ camera_lock = Lock()
 light_lock = Lock()
 calibration = {}
 light_state = None
+attitude = Attitude()
 
 
 def decode_image(data):
@@ -196,6 +198,7 @@ class LiveSession:
         self.last_matched = None
         self.tracking = None
         self.last_fix = 0
+        self.pose = MapPose()
 
     def locate(self, frame, timestamp):
         # Keep the full field of view and bound the per-frame workload for live mode.
@@ -255,7 +258,9 @@ class LiveSession:
                 while not self.stop.is_set() and monotonic() - self.last_seen < 60:
                     frame = camera.capture()
                     if frame is not None and monotonic() >= ready_at:
-                        self.frame = (monotonic(), encode_camera_frame(frame, self.correct_colors))
+                        captured_at = monotonic()
+                        imu = attitude.snapshot()
+                        self.frame = (captured_at, encode_camera_frame(frame, self.correct_colors), imu)
                     self.stop.wait(0.18)
             finally:
                 camera.stop()
@@ -301,7 +306,10 @@ def live_preview():
         error = live_session.error if live_session is not None else None
         return JSONResponse({"error": error or "Sessione live terminata."}, 409)
     snapshot = session.frame
-    return {"frame": jpeg_url(snapshot[1]) if snapshot else None}
+    return {
+        "frame": jpeg_url(snapshot[1]) if snapshot else None,
+        "pose": session.pose.snapshot(attitude.snapshot()),
+    }
 
 
 def live_match():
@@ -316,6 +324,7 @@ def live_match():
         started = monotonic()
         try:
             overlay, estimate = session.locate(decode_image(snapshot[1]), snapshot[0])
+            session.pose.update(estimate, snapshot[0], snapshot[2])
             ok, jpeg = cv.imencode(".jpg", overlay)
             if not ok:
                 raise ValueError("Impossibile creare la mappa del risultato.")
@@ -334,7 +343,6 @@ ui.expose_api("POST", "/map", downloaded_map)
 ui.expose_api("POST", "/match", match)
 ui.expose_api("POST", "/landing", capture_landing)
 ui.expose_api("POST", "/light", light)
-attitude = Attitude()
 
 
 def read_attitude():

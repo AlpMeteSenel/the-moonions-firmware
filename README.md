@@ -55,10 +55,15 @@ La correzione ? attiva al primo avvio e si applica ai nuovi fotogrammi Arduino, 
 ## Modulino Movement attitude
 
 Connect the Modulino Movement to the UNO Q Qwiic connector (Wire1, IMU address 0x6A).
-Keep the rover stationary at startup or press **Calibra IMU a rover fermo**.
+Keep the rover stationary at startup or press **Calibrate IMU while stationary**.
 The app uses 40 stationary samples for gyro bias and accelerometer magnitude
 calibration. Earth gravity is set to 9.81 m/s² in python/imu.py. Gravity aids
 roll and pitch when the measured acceleration is near the stationary magnitude.
-Yaw is relative to calibration and drifts. The visual map position and IMU
-attitude are displayed independently. Set SENSOR_TO_ROVER for the physical
+Yaw is relative to calibration and drifts. Set SENSOR_TO_ROVER for the physical
 mounting before interpreting the IMU angles as rover angles.
+
+Load a reference map and press **Start live tracking**. The marker shows the
+latest camera position in map pixels. Camera fixes anchor heading, and fresh
+IMU yaw can update it for up to three seconds after a fix. A position older
+than 1.25 seconds is labeled **Last known position**. The timing readout
+shows the processing time for the latest map match or optical flow update.

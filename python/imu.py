@@ -1,6 +1,7 @@
 import math
 from collections import deque
 from threading import Lock
+from time import monotonic
 
 import cv2 as cv
 import numpy as np
@@ -14,18 +15,23 @@ SENSOR_TO_ROVER = np.eye(3)
 class Attitude:
     def __init__(self):
         self.lock = Lock()
+        self.epoch = 0
         self.reset()
 
     def reset(self):
         with self.lock:
+            self.epoch += 1
             self.samples = deque(maxlen=40)
             self.rotation = None
             self.timestamp = None
+            self.sampled_at = None
             self.result = {"status": "waiting"}
 
     def update(self, packet):
         with self.lock:
             if not packet:
+                if self.timestamp is not None:
+                    self.epoch += 1
                 self.result = {"status": "unavailable"}
                 self.timestamp = None
                 self.samples.clear()
@@ -56,6 +62,9 @@ class Attitude:
                 self.rotation = np.array([[cp, sp * sr, sp * cr], [0, cr, -sr], [-sp, cp * sr, cp * cr]])
             dt = ((tick - self.timestamp) % (2 ** 32)) / 1000 if self.timestamp is not None else 0
             self.timestamp = tick
+            self.sampled_at = monotonic()
+            if dt >= 0.25:
+                self.epoch += 1
             if 0 < dt < 0.25:
                 omega = np.deg2rad(rates - self.bias)
                 if abs(magnitude * self.scale - LOCAL_GRAVITY) < 0.12 * LOCAL_GRAVITY:
@@ -64,6 +73,7 @@ class Attitude:
             r = self.rotation
             self.result = {
                 "status": "ready",
+                "epoch": self.epoch,
                 "roll": round(math.degrees(math.atan2(r[2, 1], r[2, 2])), 1),
                 "pitch": round(math.degrees(math.atan2(-r[2, 0], math.hypot(r[2, 1], r[2, 2]))), 1),
                 "yaw": round(math.degrees(math.atan2(r[1, 0], r[0, 0])), 1),
@@ -72,4 +82,6 @@ class Attitude:
 
     def snapshot(self):
         with self.lock:
+            if self.result["status"] == "ready" and monotonic() - self.sampled_at > 0.25:
+                return {"status": "stale"}
             return self.result.copy()
