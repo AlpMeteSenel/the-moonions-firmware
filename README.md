@@ -127,8 +127,9 @@ The pose response includes `z_m`, the estimated distance in meters from
 the camera center to the mapped surface. The live dashboard shows it directly
 under the position. `height_calibrated` indicates whether the selected map
 has a matching calibration.
-Set `HEIGHT_CALIBRATION` in `python/main.py` to a tuple of the map ID from the
-API, the map scale in meters per pixel, and `(fx, fy, cx, cy)` measured at
+Add a profile to `HEIGHT_CALIBRATIONS` in `python/main.py` using the map ID
+from the API as the key, and the map scale in meters per pixel and
+`(fx, fy, cx, cy)` as the value. Measure the camera intrinsics at
 1280 × 960 in the camera's capture mode. Use a flat, orthorectified map with
 uniform scale and a camera with negligible residual lens distortion.
 The estimate uses the visual homography and returns null without matching
@@ -144,8 +145,8 @@ acceleration and tilt errors drift. Live tracking skips nearly black frames.
 Subtract the camera's height above the lander reference point
 when appropriate for the mounted orientation.
 
-The included bench calibration applies to the exact `download (7).jpg` image.
-It uses the upper-right wheel's 30 mm diameter over about 97 pixels and a
-reference camera height of about 0.75 m. It assumes a near-overhead reference
-view and a centered principal point. Verify the scale against a second known
-height before relying on the measurements.
+The included bench calibrations apply to the exact `download (7).jpg` and
+`download (8).jpg` images. They use a 30 mm wheel diameter spanning about 97
+and 55 pixels respectively, and a reference camera height of about 0.75 m.
+They assume a near-overhead reference view and a centered principal point.
+Verify the scale against a second known height before relying on the measurements.

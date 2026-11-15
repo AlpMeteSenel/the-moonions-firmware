@@ -20,15 +20,18 @@ from matching import MapMatcher, draw_projection
 
 # Optional. Edit in App Lab, then Stop and Run again.
 MAP_URL = ""
-# Bench map download (7).jpg. The upper-right 30 mm wheel spans about 97 px.
-# The reference was captured at roughly 0.75 m, assuming a near-overhead view.
-BENCH_MAP_METERS_PER_PIXEL = 0.030 / 97
-BENCH_FOCAL_LENGTH_PX = 0.75 / BENCH_MAP_METERS_PER_PIXEL
-HEIGHT_CALIBRATION = (
-    "678543fb811057ac309efc4dd657305943b579091c46f165649e5126ccbe424b",
-    BENCH_MAP_METERS_PER_PIXEL,
-    (BENCH_FOCAL_LENGTH_PX, BENCH_FOCAL_LENGTH_PX, 639.5, 479.5),
-)
+# Map SHA-256 -> (meters per pixel, (fx, fy, cx, cy) at CAPTURE_RESOLUTION).
+# Bench profiles use a 30 mm wheel and an approximate 0.75 m reference height.
+HEIGHT_CALIBRATIONS = {
+    # download (7).jpg, wheel diameter about 97 px
+    "678543fb811057ac309efc4dd657305943b579091c46f165649e5126ccbe424b": (
+        0.030 / 97, (2425, 2425, 639.5, 479.5),
+    ),
+    # download (8).jpg, wheel diameter about 55 px
+    "b6eb6d036ddbc43d716e6e8ed1d8ae750328038fbcd5303d74f4747a927a128b": (
+        0.030 / 55, (1375, 1375, 639.5, 479.5),
+    ),
+}
 cv.setNumThreads(2)
 CAPTURE_RESOLUTION = (1280, 960)
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
@@ -177,9 +180,7 @@ class LiveSession:
         self.matcher = MapMatcher(reference, live=True)
         height, width = reference.shape[:2]
         self.map_info = {"id": map_id, "width_px": width, "height_px": height}
-        self.height_calibration = (
-            HEIGHT_CALIBRATION if HEIGHT_CALIBRATION and HEIGHT_CALIBRATION[0] == map_id else None
-        )
+        self.height_calibration = HEIGHT_CALIBRATIONS.get(map_id)
         self.correct_colors = correct_colors
         self.stop = Event()
         self.frame = None
@@ -227,7 +228,7 @@ class LiveSession:
         transform = estimate.pop("transform")
         estimate["z_m"] = None
         if self.height_calibration and not estimate["tentative"] and capture_shape[:2] == CAPTURE_RESOLUTION[::-1]:
-            _, meters_per_pixel, intrinsics = self.height_calibration
+            meters_per_pixel, intrinsics = self.height_calibration
             estimate["z_m"] = estimate_height(transform, meters_per_pixel, intrinsics, image_shape, capture_shape)
         return estimate
 
