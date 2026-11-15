@@ -4,437 +4,525 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rover Luna</title>
 <style>
-body{font:16px system-ui,sans-serif;background:#10181f;color:#eef5f6;max-width:960px;margin:auto;padding:24px}
-section{background:#1c2a33;padding:20px;border-radius:12px;margin:14px 0}
-h1,h2{margin-top:0} label{display:block;margin:12px 0} button,input{font:inherit}
-button{padding:8px 12px;margin:4px;border:0;border-radius:6px;background:#a4e7ce;color:#102820;cursor:pointer}
-button:disabled{opacity:.5} img{display:block;max-width:100%;max-height:520px;margin-top:12px}
-img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-wrap}
-.nav-grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px;margin-top:14px}
-.nav-view{min-width:0;background:#10181f;border:1px solid #3b5661;border-radius:10px;padding:12px}
-.nav-view h3{margin:0 0 8px;font-size:.9rem}
-.nav-status{margin:0 0 9px;font:600 .8rem system-ui,sans-serif;color:#b9d3dd}
-.nav-status[data-state="valid"]{color:#a4e7ce}
-.nav-status[data-state="stale"],.nav-status[data-state="tentative"]{color:#ffd086}
-.nav-stage{position:relative;width:fit-content;max-width:100%;margin:auto}
-.nav-stage img,.nav-view>img{margin:0 auto;border-radius:5px}
-.rover-point{position:absolute;transform:translate(-50%,-50%);width:19px;height:19px;border:2px solid #fff;
-    border-radius:50%;background:#25af91;color:#d0fff3;box-shadow:0 0 0 5px #0b2d2bd9;pointer-events:none}
-.rover-point[data-state="stale"],.rover-point[data-state="tentative"]{background:#b27931;color:#ffe2a8;box-shadow:0 0 0 5px #38250ad9}
-.rover-heading{position:absolute;inset:0;border-radius:50%}
-.rover-heading::before{content:"";position:absolute;top:-15px;left:50%;transform:translateX(-50%);
-    border:7px solid transparent;border-bottom:13px solid currentColor;border-top:0;filter:drop-shadow(0 1px 1px #000)}
-.landing-area,.landing-target,.landing-alternative{position:absolute;box-sizing:border-box;pointer-events:none}
-.landing-area{border:1px dashed #a4e7ce}
-.landing-target,.landing-alternative{aspect-ratio:1;border-radius:50%;transform:translate(-50%,-50%)}
-.landing-target{border:2px solid #ffd086}
-.landing-target[data-state="blocked"]{border-color:#ff8585}
-.landing-target[data-state="clear"]{border-color:#a4e7ce}
-.landing-alternative{border:2px dashed #a4e7ce;background:#25af9133}
+:root{--bg:#0d141a;--card:#16222b;--line:#2c3f4a;--text:#eef5f6;--soft:#9fb4bf;--teal:#4fe0b5;--amber:#ffc86b;--red:#ff5a4f}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.4 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:1.25rem;letter-spacing:.5px}
+.chip{font:600 .8rem system-ui;padding:4px 10px;border-radius:999px;background:#22313a;color:var(--soft)}
+.chip.ok{background:#123a30;color:var(--teal)}
+main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;padding:18px 20px;max-width:1300px;margin:auto}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.banner{grid-column:1/-1;padding:14px 18px;border-radius:12px;font-weight:700;font-size:1.15rem;background:#22313a;color:var(--soft)}
+.banner[data-state=clear]{background:#103a2f;color:var(--teal)}
+.banner[data-state=hazard]{background:#4a1412;color:#ffd6d2;box-shadow:0 0 0 2px var(--red) inset}
+.banner[data-state=blocked]{background:#3d2a0e;color:var(--amber)}
+.banner small{display:block;font-weight:500;font-size:.85rem;opacity:.85;margin-top:2px}
+.stagewrap{background:var(--card);border-radius:14px;padding:12px;min-height:300px;display:flex;align-items:center;justify-content:center}
+.stage{position:relative;max-width:100%;touch-action:none;user-select:none}
+.stage img{display:block;max-width:100%;max-height:80vh;border-radius:8px}
+.stagewrap{position:relative}
+.fsbtn{position:absolute;right:10px;top:10px;z-index:5;padding:6px 10px;font-size:.85rem;background:#0d141acc}
+.stagewrap:fullscreen{background:#000;border-radius:0;display:flex;align-items:center;justify-content:center}
+.stagewrap:fullscreen .stage img{max-height:100vh;max-width:100vw;border-radius:0}
+.stagewrap:fullscreen .livewrap img{max-height:100vh}
+.pin.drag{pointer-events:auto;cursor:grab}
+.pin.drag:active{cursor:grabbing}
+.stage.drawing{cursor:crosshair}
+.empty{color:var(--soft);text-align:center;padding:60px 20px}
+.ov{position:absolute;box-sizing:border-box;pointer-events:none}
+.area{border:2px dashed var(--teal);background:#4fe0b51a}
+.area::after{content:"LANDING SITE";position:absolute;left:4px;top:4px;font:700 .65rem system-ui;color:var(--teal);letter-spacing:.5px}
+.circle{aspect-ratio:1;border-radius:50%;transform:translate(-50%,-50%)}
+.target{border:3px solid var(--amber)}
+.target[data-state=clear]{border-color:var(--teal)}
+.target[data-state=blocked]{border-color:var(--red)}
+.alt{border:3px dashed var(--teal);background:#4fe0b533}
+.alt::after{content:"DIVERT HERE";position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:3px;white-space:nowrap;font:700 .65rem system-ui;color:#0d141a;background:var(--teal);padding:1px 6px;border-radius:4px}
+.hazard{border:3px solid var(--red);background:repeating-linear-gradient(45deg,#ff5a4f66 0 6px,transparent 6px 12px);min-width:18px}
+.hazard::after{content:"NOT LANDABLE";position:absolute;left:50%;top:-1.7em;transform:translateX(-50%);white-space:nowrap;font:700 .7rem system-ui;color:#fff;background:#d92b2b;padding:1px 7px;border-radius:4px}
+.rover{width:20px;height:20px;border:2px solid #fff;border-radius:50%;background:var(--teal);color:#d0fff3;box-shadow:0 0 0 5px #0b2d2bd9;transform:translate(-50%,-50%)}
+.rover[data-state=stale],.rover[data-state=tentative]{background:#b27931;color:#ffe2a8}
+.heading{position:absolute;inset:0;border-radius:50%}
+.heading::before{content:"";position:absolute;top:-15px;left:50%;transform:translateX(-50%);border:7px solid transparent;border-bottom:13px solid currentColor;border-top:0}
+aside{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--card);border-radius:14px;padding:16px}
+.card h2{margin:0 0 4px;font-size:1rem;display:flex;align-items:center;gap:8px}
+.n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#22313a;font-size:.8rem}
+.done .n{background:var(--teal);color:#0d141a}
+.card p{margin:4px 0 10px;color:var(--soft);font-size:.9rem}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button,.filebtn{font:600 .95rem system-ui;padding:10px 14px;border:0;border-radius:9px;background:#22313a;color:var(--text);cursor:pointer}
+button:hover,.filebtn:hover{background:#2c3f4a}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--teal);color:#0d2a22}
+button.go{width:100%;padding:16px;font-size:1.15rem;background:var(--teal);color:#0d2a22}
+button.go.stop{background:var(--red);color:#fff}
+button.link{background:none;padding:4px 0;color:var(--soft);text-decoration:underline;font-weight:500}
+.filebtn input{display:none}
+.saved{font-size:.8rem;color:var(--teal)}
+#cam{width:100%;border-radius:8px;display:block}
+#cam:not([src]){display:none}
+details{background:var(--card);border-radius:14px;padding:12px 16px}
+details summary{cursor:pointer;color:var(--soft);font-weight:600}
+details label{display:block;margin:10px 0 4px;font-size:.9rem;color:var(--soft)}
+details input[type=number]{width:110px;padding:6px;border-radius:6px;border:1px solid var(--line);background:#0d141a;color:var(--text)}
+.msg{font-size:.85rem;color:var(--soft);min-height:1.2em;white-space:pre-wrap}
+.msg.err{color:#ff9a92}
+.board{border:1px dashed #9fb4bf88;border-radius:4px;transform-origin:50% 50%}
+.north{position:absolute;width:0;height:0;pointer-events:none}
+.north::before{content:'';position:absolute;left:-2px;bottom:0;width:4px;height:60px;background:#ffd84d;border-radius:2px;box-shadow:0 0 4px #000}
+.north::after{content:'N';position:absolute;left:-9px;bottom:62px;width:18px;height:18px;border-radius:50%;background:#ffd84d;color:#0d141a;font:800 .7rem system-ui;display:grid;place-items:center;box-shadow:0 0 4px #000}
+.rotrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0}
+.rotrow button{padding:6px 9px;font-size:.85rem}
+.rotrow b{min-width:80px;font-size:.9rem}
+.board .bname{position:absolute;left:6px;bottom:4px;font:600 .65rem system-ui;color:#cfe0e8;background:#0d141acc;padding:1px 6px;border-radius:4px;white-space:nowrap}
+.pin{position:absolute;transform:translate(-50%,-50%);pointer-events:none;border-radius:50%;aspect-ratio:1;min-width:16px;border:3px solid var(--amber);background:#ffc86b22}
+.pin.backup{border-color:var(--teal);background:#4fe0b522}
+.pin.blocked{border-color:var(--red);background:repeating-linear-gradient(45deg,#ff5a4f55 0 6px,transparent 6px 12px)}
+.pin span{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:800 .8rem system-ui;color:#fff;text-shadow:0 1px 3px #000;white-space:nowrap}
+.pin small{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:4px;font:700 .62rem system-ui;color:#0d141a;background:var(--amber);padding:1px 6px;border-radius:4px;white-space:nowrap}
+.pin.backup small{background:var(--teal)}
+.pin.blocked small{background:#d92b2b;color:#fff}
+textarea{width:100%;min-height:90px;border-radius:8px;border:1px solid var(--line);background:#0d141a;color:var(--text);font:12px ui-monospace,monospace;padding:8px}
+.livewrap{position:relative}
+.livewrap img{display:block;max-width:100%;max-height:70vh;border-radius:8px}
+.livebadge{position:absolute;left:10px;top:10px;font:700 .75rem system-ui;color:#fff;background:#d92b2b;padding:3px 8px;border-radius:5px;letter-spacing:.5px}
+.livebadge::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:#fff;margin-right:6px;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.2}}
+.grid3{position:absolute;inset:0;pointer-events:none;border-radius:8px;background:linear-gradient(#ffffff26 1px,transparent 1px) 0 0/33.33% 33.33%,linear-gradient(90deg,#ffffff26 1px,transparent 1px) 0 0/33.33% 33.33%}
 [hidden]{display:none!important}
-@media(max-width:670px){.nav-grid{grid-template-columns:minmax(0,1fr)}}
 </style>
-<h1>Rover Luna</h1>
-<section>
-<h2>Map and camera</h2>
-<label>Reference map <input id="mapFile" type="file" accept="image/jpeg,image/png"></label>
-<button id="download">Download reference map</button>
-<label>Upload camera frame <input id="frameFile" type="file" accept="image/jpeg,image/png"></label>
-<label><input id="correctColors" type="checkbox" checked> Correct camera colors</label>
-<button id="capture">Take photo</button>
-<button id="match">Find position on map</button>
-<button id="landing">Run landing test (5 s capture)</button>
-<button id="live">Start live tracking</button>
-<button id="chooseLandingArea" type="button">Mark clear landing area</button>
-<label>Landing footprint (% of full map width)
-  <input id="landingFootprint" type="number" min="2" max="50" step="0.1" value="12">
-</label>
-<output id="landingSetup" aria-live="polite"></output>
-<output id="visionStatus" aria-live="polite"></output>
-<img id="framePreview" alt="Latest camera frame">
-<img id="mapPreview" alt="Reference map with the matched camera outline">
-<div id="liveNavigation" class="nav-grid" hidden>
-  <div class="nav-view">
-    <h3>Rover position</h3>
-    <output id="poseStatus" class="nav-status">Waiting for the camera…</output>
-    <output id="heightStatus" class="nav-status">Height · Waiting for a pose</output>
-    <output id="landingStatus" class="nav-status" aria-live="polite" hidden></output>
-    <label>Measured starting height (m) <input id="initialHeight" type="number" min="0.001" step="any" placeholder="0.75"></label>
-    <button id="setHeight">Set IMU starting height</button>
-    <output id="heightSetupStatus" class="nav-status" aria-live="polite"></output>
-    <div class="nav-stage">
-      <img id="navMap" alt="Reference map">
-      <div id="landingArea" class="landing-area" hidden></div>
-      <div id="landingTarget" class="landing-target" hidden></div>
-      <div id="landingAlternative" class="landing-alternative" hidden></div>
-      <div id="roverPoint" class="rover-point" hidden><span id="roverHeading" class="rover-heading"></span></div>
+
+<header>
+  <h1>🌕 Rover Luna</h1>
+  <span id="imuChip" class="chip">IMU…</span>
+</header>
+
+<main>
+  <div id="banner" class="banner" data-state="idle">Set up the map and landing site, then start the mission.</div>
+
+  <div id="stagewrap" class="stagewrap">
+    <button id="fullscreen" class="fsbtn" type="button" hidden>⛶ Full screen</button>
+    <div id="liveView" class="livewrap" hidden>
+      <img id="liveImg" alt="Live rover camera">
+      <div class="grid3"></div>
+      <span class="livebadge">LIVE</span>
+    </div>
+    <div id="empty" class="empty">No map yet.<br>Take a photo of the board with the rover camera, or upload one →</div>
+    <div id="stage" class="stage" hidden>
+      <img id="map" alt="Reference map of the landing board">
+      <div id="board" class="ov board" hidden><span id="boardName" class="bname"></span></div>
+      <span id="northArrow" class="north" hidden></span>
+      <div id="pins"></div>
+      <div id="area" class="ov area" hidden></div>
+      <div id="drawRect" class="ov area" hidden></div>
+      <div id="target" class="ov circle target" hidden></div>
+      <div id="alt" class="ov circle alt" hidden></div>
+      <div id="hazard" class="ov circle hazard" hidden></div>
+      <div id="rover" class="ov rover" hidden><span id="heading" class="heading"></span></div>
     </div>
   </div>
-  <div class="nav-view">
-    <h3>Rover camera</h3>
-    <img id="navFrame" alt="Latest rover camera frame">
-  </div>
-</div>
-</section>
-<section>
-<h2>Lander status</h2>
-<button id="armLander" disabled>Arm landing detection manually</button>
-<output id="landerStatus" aria-live="polite">Waiting for the IMU…</output>
-<button id="calibrateImu">Calibrate IMU while stationary</button>
-<output id="imuStatus" aria-live="polite"></output>
-</section>
+
+  <aside>
+    <div id="step1" class="card">
+      <h2><span class="n">1</span> Map</h2>
+      <p>Saved on the rover until you change it.</p>
+      <div id="mapButtons" class="row">
+        <button id="snapMap" class="primary">📷 Live view</button>
+        <label class="filebtn">⬆ Upload<input id="mapFile" type="file" accept="image/jpeg,image/png"></label>
+        <button id="cropMap" hidden>✂ Crop to board</button>
+      </div>
+      <div id="liveButtons" class="row" hidden>
+        <button id="useView" class="primary">📸 Use this view as map</button>
+        <button id="cancelView">Cancel</button>
+      </div>
+      <div id="mapSaved" class="saved"></div>
+    </div>
+
+    <div id="step2" class="card">
+      <h2><span class="n">2</span> Landing site</h2>
+      <div id="regionInfo" class="saved"></div>
+      <div id="rotRow" class="rotrow" hidden>
+        <b id="rotLabel">North ↑ 0°</b>
+        <button data-rot="-45">↺ 45°</button><button data-rot="-5">↺ 5°</button>
+        <button data-rot="5">↻ 5°</button><button data-rot="45">↻ 45°</button>
+      </div>
+      <p>Import Z1/Z2 from Plan Banana (Z1 becomes the landing site). Drag Z1 or Z2 on the map to fine-tune them, or drag a box yourself.</p>
+      <details id="importBox">
+        <summary>Import from Plan Banana</summary>
+        <textarea id="regionText" placeholder='Paste the region JSON, e.g. {"id":"mouton-plateau", … "zones":[…]}'></textarea>
+        <div class="row"><button id="importRegion" class="primary">Import region</button><button id="clearRegion" class="link" hidden>Remove region</button></div>
+      </details>
+      <div id="zoneSaved" class="saved"></div>
+      <button id="clearZone" class="link" hidden>Remove landing site</button>
+    </div>
+
+    <div class="card">
+      <button id="go" class="go" disabled>▶ Start mission</button>
+      <div id="msg" class="msg"></div>
+      <img id="cam" alt="Live rover camera">
+    </div>
+
+    <details>
+      <summary>Advanced</summary>
+      <label><input id="correctColors" type="checkbox" checked> Correct camera colours</label>
+      <label>Lander footprint (% of map width)</label>
+      <input id="footprint" type="number" min="2" max="50" step="0.5" value="12">
+      <label>Starting height above the map (m)</label>
+      <div class="row"><input id="initialHeight" type="number" min="0.001" step="any" placeholder="0.75"><button id="setHeight">Set</button></div>
+      <div id="poseLine" class="msg"></div>
+      <div id="heightLine" class="msg"></div>
+      <label>IMU</label>
+      <div id="imuLine" class="msg"></div>
+      <div class="row"><button id="calibrateImu">Calibrate (keep still)</button><button id="armLander" disabled>Arm landing detection</button></div>
+      <div id="landerLine" class="msg"></div>
+    </details>
+  </aside>
+</main>
+
 <script>
-const get = id => document.getElementById(id);
-let reference, frame;
-let visionBusy = false;
-let liveActive = false;
-let landingArea;
-let landingCorner;
-let choosingLandingArea = false;
-const CAMERA_WAIT_MS = 12000;
-const CAMERA_UNAVAILABLE = "The Uno Q camera did not respond. Check whether another app is using it.";
-const diagnosticTranslations = [
-    ["Usa una foto JPG o PNG entro 12 MB.", "Use a JPG or PNG image up to 12 MB."],
-    ["Immagine illeggibile. Usa JPG o PNG.", "Could not decode the image. Use JPG or PNG."],
-    [/La camera non ha restituito (?:un fotogramma|fotogrammi)\./, "The camera returned no frames."],
-    ["Imposta MAP_URL in python/main.py, oppure carica una foto.", "Set MAP_URL in python/main.py or upload a reference image."],
-    [/Impossibile creare (?:la mappa|l'immagine) del risultato\./, "Could not create the result image."],
-    ["Impossibile ricodificare la mappa.", "Could not encode the reference map."],
-    ["Impossibile codificare il fotogramma della camera.", "Could not encode the camera frame."],
-    ["Sessione live terminata.", "Live tracking session ended."],
-    ["Contrasto locale:", "Enhanced contrast:"],
-    ["Dettagli insufficienti.", "Too little image detail."],
-    [/Punti rilevati: fotogramma (\d+), mappa (\d+)\./g, "Detected features: $1 in the frame, $2 in the map."],
-    [/Solo (\d+\/\d+) corrispondenze distinte\./g, "Only $1 distinct matches."],
-    ["Nessuna trasformazione coerente.", "Could not find a consistent match."],
-    [/Match incerto \((\d+\/\d+) punti coerenti\)\./g, "Uncertain match ($1 inliers)."],
-    ["Proiezione non valida.", "Invalid projection."],
-    ["Il contorno stimato non è plausibile.", "The projected camera outline is implausible."],
-    ["Il centro stimato è fuori dalla mappa.", "The projected position is outside the reference map."],
-];
+const $ = id => document.getElementById(id);
+const pause = ms => new Promise(r => setTimeout(r, ms));
+let mapUrl = null, zone = null, live = false, busy = false;
+let lastZone = null, lastZoneAt = 0;
+let viewing = false;
+let region = null;
+let cropped = false;                   // Plan Banana region laid over the board (Z1/Z2)                 // live camera view for lining up the map photo   // keep the last definite result through short gaps
 
-function englishDiagnostic(message) {
-    if (typeof message !== "string") return "";
-    if (/La camera .? ?occupata\.|Failed to open camera|Device or resource busy/i.test(message)) return CAMERA_UNAVAILABLE;
-    for (const [from, to] of diagnosticTranslations) {
-        message = typeof from === "string" ? message.replaceAll(from, to) : message.replace(from, to);
-    }
-    return message;
+async function api(method, path, data, timeout = 15000) {
+  const signal = AbortSignal.timeout(timeout);
+  let res;
+  try {
+    res = await fetch(path, {method, headers: {"Content-Type": "application/json"},
+      body: data === undefined ? undefined : JSON.stringify(data), signal});
+  } catch (e) {
+    throw new Error(signal.aborted ? "The rover did not respond. Check that the camera is free and try again." : e.message);
+  }
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || "Error " + res.status);
+  return out;
+}
+const post = (p, d, t) => api("POST", p, d, t);
+function say(text, err = false) { $("msg").textContent = text || ""; $("msg").classList.toggle("err", err); }
+function banner(state, title, sub = "") {
+  $("banner").dataset.state = state;
+  $("banner").innerHTML = title + (sub ? "<small>" + sub + "</small>" : "");
+}
+function place(el, x, y, w) {
+  el.style.left = 100 * x + "%"; el.style.top = 100 * y + "%";
+  if (w != null) el.style.width = 100 * w + "%";
+}
+function placeRect(el, [l, t, r, b]) {
+  el.style.left = 100 * l + "%"; el.style.top = 100 * t + "%";
+  el.style.width = 100 * (r - l) + "%"; el.style.height = 100 * (b - t) + "%";
 }
 
-async function post(path, data) {
-    const onCamera = /^\/(?:capture|landing|live\/)/.test(path);
-    const signal = AbortSignal.timeout(path.startsWith("/landing") ? 25000 : CAMERA_WAIT_MS);
-    try {
-        const response = await fetch(path, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: data === undefined ? undefined : JSON.stringify(data),
-            signal,
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(englishDiagnostic(result.error) || "HTTP error " + response.status);
-        return result;
-    } catch (error) {
-        if (signal.aborted) {
-            throw new Error(onCamera ? CAMERA_UNAVAILABLE : "The Uno Q did not respond. Try again.");
-        }
-        throw error;
-    }
+// ---------------------------------------------------------------- setup state
+function render() {
+  $("liveView").hidden = !viewing;
+  $("mapButtons").hidden = viewing;
+  $("liveButtons").hidden = !viewing;
+  $("empty").hidden = !!mapUrl || viewing;
+  $("stage").hidden = !mapUrl || viewing;
+  if (mapUrl && $("map").src !== mapUrl) $("map").src = mapUrl;
+  $("step1").classList.toggle("done", !!mapUrl);
+  $("step2").classList.toggle("done", !!zone);
+  $("area").hidden = !zone;
+  if (zone) placeRect($("area"), zone.area);
+  $("zoneSaved").textContent = zone ? (region ? "✓ Landing site = Z1 from Plan Banana" : "✓ Landing site saved") : "";
+  drawRegion();
+  $("clearZone").hidden = !zone || live;
+  $("stage").classList.toggle("drawing", !!mapUrl && !live);
+  $("go").disabled = !mapUrl || busy || viewing;
+  $("snapMap").disabled = $("mapFile").disabled = live || busy;
+  $("cropMap").hidden = !mapUrl || viewing || cropped; $("cropMap").disabled = live || busy;
+  $("fullscreen").hidden = !mapUrl && !viewing;
+  $("useView").disabled = $("cancelView").disabled = busy;
+  if (viewing) banner("idle", "Live view: hold the rover where it will hover and frame the whole board, then press “Use this view as map”.");
+  else if (!live) banner("idle", !mapUrl ? "Step 1: take or upload a map photo." :
+    !zone ? "Step 2: drag a box around the landing site on the map." : "Ready. Press Start mission.");
 }
-function readPhoto(file) {
-    return new Promise((resolve, reject) => {
-        if (file.size > 12 * 1024 * 1024) return reject(new Error("The image exceeds 12 MB."));
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error("Could not read the image."));
-        reader.readAsDataURL(file);
+async function loadSetup() {
+  try {
+    const s = await api("GET", "/setup");
+    mapUrl = s.map; zone = s.landing_zone; region = s.region; cropped = !!s.cropped;
+    if (zone) $("footprint").value = Math.round(zone.footprint * 1000) / 10;
+    $("mapSaved").textContent = s.map_saved_at ? "✓ Saved " + new Date(s.map_saved_at * 1000).toLocaleString() : "";
+  } catch (e) { say(e.message, true); }
+  render();
+}
+async function busyDo(fn, text) {
+  if (busy) return;
+  busy = true; render(); say(text);
+  try { say(await fn() || ""); } catch (e) { say(e.message, true); }
+  finally { busy = false; render(); }
+}
+async function viewLoop() {
+  let gotFrame = false; const t0 = performance.now();
+  while (viewing) {
+    try {
+      const r = await post("/setup/preview?correct_colors=" + $("correctColors").checked, undefined, 8000);
+      if (!viewing) return;
+      if (r.frame) { gotFrame = true; $("liveImg").src = r.frame; }
+      else if (!gotFrame && performance.now() - t0 > 10000) throw new Error("The rover camera did not respond.");
+    } catch (e) { if (viewing) { say(e.message, true); stopView(); } return; }
+    await pause(120);
+  }
+}
+async function stopView() {
+  if (!viewing) return;
+  viewing = false; render();
+  try { await post("/setup/preview/stop"); } catch {}
+}
+$("snapMap").onclick = () => busyDo(async () => {
+  await post("/setup/preview/start");
+  viewing = true; $("liveImg").removeAttribute("src");
+  viewLoop();
+  return "Live view on. Frame the board, then press “Use this view as map”.";
+}, "Opening the camera…");
+$("useView").onclick = () => busyDo(async () => {
+  const r = await post("/setup/map/camera?correct_colors=" + $("correctColors").checked, undefined, 20000);
+  viewing = false;
+  mapUrl = r.map; zone = null; region = null; cropped = false;
+  $("mapSaved").textContent = "✓ Saved " + new Date().toLocaleString();
+  return "Map saved. Now drag a box around the landing site.";
+}, "Saving this view as the map…");
+$("cropMap").onclick = () => busyDo(async () => {
+  const r = await post("/setup/map/crop", undefined, 30000);
+  mapUrl = r.map; zone = r.landing_zone ?? null; region = r.region ?? null; cropped = true;
+  $("mapSaved").textContent = "✓ Cropped to the board · " + new Date().toLocaleString();
+  return "Map cropped to the board." + (region ? " Z1/Z2 kept." : "");
+}, "Cropping the map to the board…");
+$("fullscreen").onclick = () => {
+  const w = $("stagewrap");
+  if (document.fullscreenElement) document.exitFullscreen(); else w.requestFullscreen?.();
+};
+document.addEventListener("fullscreenchange", () => { $("fullscreen").textContent = document.fullscreenElement ? "✕ Exit full screen" : "⛶ Full screen"; });
+$("cancelView").onclick = () => { stopView(); say(""); };
+$("mapFile").onchange = e => {
+  const file = e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  busyDo(async () => {
+    if (file.size > 12 * 1024 * 1024) throw new Error("The image is larger than 12 MB.");
+    const dataUrl = await new Promise((ok, bad) => {
+      const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => bad(new Error("Could not read the file.")); fr.readAsDataURL(file);
     });
-}
-async function vision(action, busyMessage = "Processing…") {
-    if (visionBusy) return;
-    visionBusy = true;
-    const controls = ["mapFile", "frameFile", "download", "capture", "match", "landing", "correctColors", "live",
-        "chooseLandingArea", "landingFootprint"].map(get);
-    controls.forEach(control => control.disabled = true);
-    get("visionStatus").textContent = busyMessage;
-    try {
-        get("visionStatus").textContent = await action();
-    } catch (error) {
-        if (reference) get("mapPreview").src = reference;
-        get("visionStatus").textContent = error.message;
-    } finally {
-        controls.forEach(control => control.disabled = false);
-        visionBusy = false;
-    }
-}
-function showMap(image) {
-    reference = image;
-    landingArea = landingCorner = undefined;
-    choosingLandingArea = false;
-    get("landingSetup").textContent = "";
-    get("mapPreview").src = image;
-    return "Reference map ready.";
-}
-get("chooseLandingArea").onclick = () => {
-    if (!reference) {
-        get("landingSetup").textContent = "Load a reference map first.";
-        return;
-    }
-    get("mapPreview").src = reference;
-    landingCorner = undefined;
-    choosingLandingArea = true;
-    get("landingSetup").textContent = "Click one corner of the clear area on the map.";
+    const r = await post("/setup/map", {map: dataUrl.split(",")[1]}, 30000);
+    mapUrl = r.map; zone = null; region = null; cropped = false;
+    $("mapSaved").textContent = "✓ Saved " + new Date().toLocaleString();
+    return "Map saved. Now drag a box around the landing site.";
+  }, "Uploading the map…");
 };
-get("mapPreview").onclick = event => {
-    if (!choosingLandingArea || visionBusy) return;
-    const box = get("mapPreview").getBoundingClientRect();
-    const point = [(event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height];
-    if (!landingCorner) {
-        landingCorner = point;
-        get("landingSetup").textContent = "Click the opposite corner.";
-        return;
-    }
-    const [x, y] = landingCorner;
-    landingArea = [Math.min(x, point[0]), Math.min(y, point[1]), Math.max(x, point[0]), Math.max(y, point[1])];
-    choosingLandingArea = false;
-    get("landingSetup").textContent = "Clear reference area marked.";
-};
-function showFrame(image) {
-    frame = image;
-    get("framePreview").src = image;
-    if (reference) get("mapPreview").src = reference;
-    return "Camera frame ready.";
+function drawRegion(blockedId = null) {
+  const pins = $("pins"); pins.innerHTML = "";
+  $("board").hidden = !region;
+  if (!region) $("northArrow").hidden = true;
+  $("regionInfo").textContent = region ? "🌕 " + (region.name || region.id || "Region") + " · " + region.region_size_km + " km · " +
+    region.zones.length + " zones" + (region.optimal_touchdown_utc ? " · touchdown " + region.optimal_touchdown_utc.replace("T", " ").slice(0, 16) + " UTC" : "") : "";
+  $("clearRegion").hidden = !region || live;
+  $("rotRow").hidden = !region || live;
+  if (!region) return;
+  const sq = region.square;
+  if (sq) {
+    const b = $("board");
+    b.style.left = 100 * (sq.x_norm - sq.w_norm / 2) + "%"; b.style.top = 100 * (sq.y_norm - sq.h_norm / 2) + "%";
+    b.style.width = 100 * sq.w_norm + "%"; b.style.height = 100 * sq.h_norm + "%";
+    b.style.transform = "rotate(" + (sq.angle || 0) + "deg)";
+  } else { placeRect($("board"), region.board); $("board").style.transform = ""; }
+  const rot = region.rotation_deg || 0;
+  const na = $("northArrow"); na.hidden = false;
+  place(na, sq ? sq.x_norm : (region.board[0] + region.board[2]) / 2, sq ? sq.y_norm : (region.board[1] + region.board[3]) / 2);
+  na.style.transform = "rotate(" + rot + "deg)";
+  $("rotLabel").textContent = "North " + (rot === 0 ? "↑ 0°" : "↻ " + (rot > 180 ? rot - 360 : rot) + "°");
+  $("boardName").textContent = (region.name || "Region") + " · " + region.region_size_km + " km";
+  for (const z of region.zones) {
+    const el = document.createElement("div");
+    const primary = z.rank === 1, blocked = z.id === blockedId;
+    el.className = "pin" + (primary ? "" : " backup") + (blocked ? " blocked" : "");
+    place(el, z.x_norm, z.y_norm, Math.max(z.r_norm * 2, 0.035));
+    const success = z.target_success != null ? " · " + (100 * z.target_success).toFixed(1) + "%" : "";
+    el.innerHTML = "<span>" + z.id + "</span><small>" + (blocked ? "NOT LANDABLE" : (primary ? "PRIMARY" : "BACKUP") + success) + "</small>";
+    if (!live && !busy) { el.classList.add("drag"); el.title = "Drag to move " + z.id; makeDraggable(el, z); }
+    pins.appendChild(el);
+  }
 }
-get("mapFile").onchange = event => {
-    const file = event.target.files[0];
-    if (file) vision(async () => showMap(await readPhoto(file)));
-};
-get("frameFile").onchange = event => {
-    const file = event.target.files[0];
-    if (file) vision(async () => showFrame(await readPhoto(file)));
-};
-get("capture").onclick = () => vision(async () => {
-    const result = await post("/capture?correct_colors=" + get("correctColors").checked);
-    return showFrame(result.frame);
-}, "Opening the camera and taking a photo…");
-get("download").onclick = () => vision(async () => showMap((await post("/map")).map));
-get("match").onclick = () => vision(async () => {
-    if (!reference || !frame) throw new Error("Choose a reference map and capture or upload a camera frame.");
-    const result = await post("/match", {map: reference.split(",")[1], frame: frame.split(",")[1]});
-    get("mapPreview").src = result.overlay;
-    return (result.tentative ? "Tentative position. Center: " : "Position on map: ") + result.x + ", " + result.y + " px · Camera heading: " +
-        result.angle + "° · Matching inliers: " + result.inliers + "/" + result.matches;
+function makeDraggable(el, z) {
+  el.addEventListener("pointerdown", e => {
+    e.stopPropagation(); e.preventDefault(); el.setPointerCapture(e.pointerId);
+    let moved = false, pos = [z.x_norm, z.y_norm];
+    const move = ev => { moved = true; pos = norm(ev); place(el, pos[0], pos[1]); };
+    const up = () => {
+      el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up);
+      if (!moved) return;
+      busyDo(async () => {
+        const r = await post("/setup/region", {move: {id: z.id, x_norm: pos[0], y_norm: pos[1]}});
+        region = r.region; zone = r.landing_zone;
+        return z.id + " moved." + (z.rank === 1 ? " The landing site moved with it." : "");
+      }, "Saving " + z.id + "…");
+    };
+    el.addEventListener("pointermove", move); el.addEventListener("pointerup", up);
+  });
+}
+function backupText() {
+  const b = region?.zones.filter(z => z.rank !== 1).sort((a, c) => (a.rank ?? 9) - (c.rank ?? 9))[0];
+  if (!b) return null;
+  const f = b.from_primary;
+  return "Divert to " + b.id + (f ? " · " + (f.distance_m / 1000).toFixed(1) + " km " + f.direction + " · decide within " + Math.round(f.decide_by_s) + " s" : "");
+}
+$("importRegion").onclick = () => busyDo(async () => {
+  if (!mapUrl) throw new Error("Save a map first (step 1).");
+  // forgive a copy that stops before the closing brackets
+  const raw = $("regionText").value.trim().replace(/,\s*$/, "");
+  let parsed = null;
+  for (const tail of ["", "}", "]}", "}]}", "]}}", "}}"]) {
+    try { parsed = JSON.parse((raw.startsWith("{") ? raw : "{" + raw) + tail); break; } catch {}
+  }
+  if (!parsed) throw new Error("That isn't valid JSON. Copy the whole region object, from { to }.");
+  const r = await post("/setup/region", {region: parsed, footprint: Math.min(0.5, Math.max(0.02, $("footprint").valueAsNumber / 100 || 0.1))});
+  region = r.region; zone = r.landing_zone; $("importBox").open = false;
+  return "Region imported. Z1 is now the landing site, Z2 the backup.";
+}, "Placing the region on the board…");
+for (const btn of document.querySelectorAll("#rotRow button")) btn.onclick = () => busyDo(async () => {
+  const next = ((region?.rotation_deg || 0) + Number(btn.dataset.rot) + 360) % 360;
+  const r = await post("/setup/region", {rotation_deg: next});
+  region = r.region; zone = r.landing_zone;
+  return "North rotated to " + (next > 180 ? next - 360 : next) + "°. Z1 moved with it and is still the landing site.";
+}, "Rotating the region…");
+$("clearRegion").onclick = () => busyDo(async () => { await post("/setup/region", {region: null}); region = null; return "Region removed."; });
+async function saveZone(area) {
+  const footprint = Math.min(0.5, Math.max(0.02, $("footprint").valueAsNumber / 100 || 0.12));
+  const r = await post("/setup/zone", {landing_zone: area ? {area, footprint} : null});
+  zone = r.landing_zone;
+}
+$("clearZone").onclick = () => busyDo(async () => { await saveZone(null); return "Landing site removed."; });
+$("footprint").onchange = () => { if (zone && !live) busyDo(async () => { await saveZone(zone.area); return "Footprint saved."; }); };
+
+// drag a box on the map
+let dragStart = null;
+function norm(e) {
+  const b = $("map").getBoundingClientRect();
+  return [Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)), Math.min(1, Math.max(0, (e.clientY - b.top) / b.height))];
+}
+$("stage").addEventListener("pointerdown", e => {
+  if (!mapUrl || live || busy) return;
+  dragStart = norm(e); $("stage").setPointerCapture(e.pointerId);
+  $("drawRect").hidden = false; placeRect($("drawRect"), [...dragStart, ...dragStart]);
 });
-get("landing").onclick = () => vision(async () => {
-    if (!reference) throw new Error("Upload a reference map first.");
-    get("visionStatus").textContent = "Capturing descent. Hold the camera still for the final two seconds.";
-    get("mapPreview").src = reference;
-    const result = await post("/landing?correct_colors=" + get("correctColors").checked, {map: reference.split(",")[1]});
-    showFrame(result.frame);
-    const counts = result.valid + " valid late matches from " + result.total + " captured frames.";
-    if (!result.confirmed && !result.overlay) {
-        return ["No reliable position estimate. " + counts, ...(result.diagnostics ?? []).map(englishDiagnostic)].join("\n");
-    }
-    if (!result.confirmed) {
-        get("mapPreview").src = result.overlay;
-        return "Tentative position at " + result.timestamp + " s. Center: " + result.x + ", " +
-            result.y + " px. Matching inliers: " + result.inliers + "/" + result.matches + ".";
-    }
-    get("mapPreview").src = result.overlay;
-    return "Center: " + result.x + ", " + result.y + " px. Heading: " + result.angle + "°. " + counts;
+$("stage").addEventListener("pointermove", e => {
+  if (!dragStart) return;
+  const p = norm(e);
+  placeRect($("drawRect"), [Math.min(dragStart[0], p[0]), Math.min(dragStart[1], p[1]), Math.max(dragStart[0], p[0]), Math.max(dragStart[1], p[1])]);
 });
-const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-function showLandingZone(zone) {
-    const status = get("landingStatus");
-    const area = get("landingArea");
-    status.hidden = area.hidden = !zone;
-    for (const [id, point] of [["landingTarget", zone?.target], ["landingAlternative", zone?.alternative]]) {
-        const marker = get(id);
-        marker.hidden = !point;
-        if (point) {
-            marker.dataset.state = zone.status;
-            marker.style.left = 100 * point.x_norm + "%";
-            marker.style.top = 100 * point.y_norm + "%";
-            marker.style.width = 100 * zone.footprint + "%";
-        }
-    }
-    if (!zone) return;
-    const [left, top, right, bottom] = zone.area;
-    area.style.left = 100 * left + "%";
-    area.style.top = 100 * top + "%";
-    area.style.width = 100 * (right - left) + "%";
-    area.style.height = 100 * (bottom - top) + "%";
-    status.textContent = {
-        unknown: "Landing zone unverified · " + zone.reason,
-        clear: "No obstacle detected in the landing footprint",
-        blocked: zone.alternative ? "Landing zone blocked · Alternative marked on map" :
-            "Landing zone blocked · No visible alternative"
-    }[zone.status];
+$("stage").addEventListener("pointerup", e => {
+  if (!dragStart) return;
+  const p = norm(e), s = dragStart; dragStart = null; $("drawRect").hidden = true;
+  const area = [Math.min(s[0], p[0]), Math.min(s[1], p[1]), Math.max(s[0], p[0]), Math.max(s[1], p[1])];
+  if (area[2] - area[0] < 0.03 || area[3] - area[1] < 0.03) { say("Drag a bigger box around the landing site."); return; }
+  busyDo(async () => { await saveZone(area); return "Landing site saved."; }, "Saving the landing site…");
+});
+
+// ---------------------------------------------------------------- mission (live)
+function showZone(z) {
+  if (z && z.status !== "unknown") { lastZone = z; lastZoneAt = performance.now(); }
+  else if (z && !z.hazard && lastZone && performance.now() - lastZoneAt < 4000) z = {...lastZone, hazard: z.hazard ?? lastZone.hazard};
+  for (const [id, pt] of [["target", z?.target], ["alt", z?.alternative]]) {
+    $(id).hidden = !pt;
+    if (pt) { $(id).dataset.state = z.status; place($(id), pt.x_norm, pt.y_norm, z.footprint); }
+  }
+  $("hazard").hidden = !z?.hazard;
+  if (z?.hazard) place($("hazard"), z.hazard.x_norm, z.hazard.y_norm, Math.max(2 * z.hazard.r_norm, z.footprint * 0.6));
+  if (!z) { banner("wait", "Mission running · no landing site set", "Drag a landing site on the map before the next run to get hazard checks."); return; }
+  const primaryId = region?.zones.find(q => q.rank === 1)?.id;
+  const primaryBlocked = z.hazard?.inside_landing_area;
+  drawRegion(primaryBlocked ? primaryId : null);
+  if (primaryBlocked) banner("hazard", "⚠ RED HAZARD · " + (primaryId ? primaryId + " " : "original landing site ") + "NOT LANDABLE",
+    backupText() || (z.alternative ? "Diverting to the clear spot marked on the map." : "Searching for a clear spot. Move the camera over more of the site."));
+  else if (z.hazard) banner("hazard", "⚠ RED HAZARD · MARKED SPOT NOT LANDABLE",
+    "The red obstacle is outside the selected landing area.");
+  else if (z.status === "clear") banner("clear", "✓ " + (primaryId ? primaryId + " " : "Landing site ") + "clear", "No obstacle in the lander footprint.");
+  else if (z.status === "blocked") banner("blocked", "Landing site blocked", z.alternative ? "Alternative marked on the map." : "No clear alternative in view.");
+  else banner("wait", "Checking the landing site…", z.reason || "Waiting for a camera position.");
 }
-function showPose(pose) {
-    const marker = get("roverPoint");
-    const heading = get("roverHeading");
-    const status = get("poseStatus");
-    const state = pose?.tracking_status ?? "waiting";
-    status.dataset.state = marker.dataset.state = state;
-    const height = get("heightStatus");
-    if (pose?.z_m != null) {
-        const heightLabel = {
-            camera: "Camera height",
-            initial: "Measured starting height",
-            imu: "IMU estimated height",
-            last_imu: "Last IMU height",
-            last_initial: "Last measured starting height",
-            last_camera: "Last camera height"
-        }[pose.height_source];
-        height.textContent = heightLabel + " · " + pose.z_m.toFixed(3) + " m above map" +
-            (pose.height_source.startsWith("last_") ?
-                " · " + (pose.height_estimate_age_ms / 1000).toFixed(1) + " s ago" : "");
-    } else {
-        height.textContent = "Height · " + (pose?.height_calibrated === false ?
-            "Map scale and camera calibration required" : "Waiting for a reliable height estimate");
-    }
-    const map = get("navMap");
-    marker.hidden = pose?.x_norm == null || pose.y_norm == null || !map.naturalWidth;
-    if (marker.hidden) {
-        status.textContent = "Waiting for a camera position…";
-        return;
-    }
-    marker.style.left = 100 * pose.x_norm + "%";
-    marker.style.top = 100 * pose.y_norm + "%";
-    heading.hidden = pose.heading_deg === null;
-    heading.style.transform = heading.hidden ? "" : "rotate(" + pose.heading_deg + "deg)";
-    const label = {
-        valid: "Live position",
-        tentative: "Tentative position",
-        stale: "Last known position"
-    }[state];
-    const source = pose.heading_source === "camera_imu" ?
-        (state === "stale" ? "IMU heading" : "Camera + IMU heading") : "Camera heading";
-    status.textContent = label + " · X " + pose.x_norm.toFixed(4) + " · Y " + pose.y_norm.toFixed(4) +
-        (state === "stale" ? " · " + (pose.frame_age_ms / 1000).toFixed(1) + " s ago" : "") +
-        (heading.hidden ? "" : " · " + source + " " + pose.heading_deg + "°");
+function showPose(p) {
+  const st = p?.tracking_status ?? "waiting";
+  $("rover").dataset.state = st;
+  const has = p?.x_norm != null && p?.y_norm != null;
+  $("rover").hidden = !has;
+  if (has) {
+    place($("rover"), p.x_norm, p.y_norm);
+    $("heading").hidden = p.heading_deg == null;
+    if (p.heading_deg != null) $("heading").style.transform = "rotate(" + p.heading_deg + "deg)";
+  }
+  $("poseLine").textContent = has ? ({valid: "Live position", tentative: "Tentative position", stale: "Last known position"}[st] || st) +
+    " · X " + p.x_norm.toFixed(3) + " · Y " + p.y_norm.toFixed(3) + (p.heading_deg != null ? " · heading " + p.heading_deg + "°" : "") : "Position · waiting for the camera";
+  $("heightLine").textContent = p?.z_m != null ? "Height " + p.z_m.toFixed(3) + " m (" + p.height_source + ")" : "";
 }
-get("setHeight").onclick = async () => {
-    const button = get("setHeight");
-    const status = get("heightSetupStatus");
-    button.disabled = true;
-    try {
-        await post("/live/height", {height_m: get("initialHeight").valueAsNumber});
-        status.textContent = "";
-    } catch (error) {
-        status.textContent = error.message;
-    } finally {
-        button.disabled = false;
-    }
-};
-async function livePreview() {
-    const start = performance.now();
-    let receivedFrame = false;
-    while (liveActive) {
-        const result = await post("/live/preview");
-        if (!liveActive) return;
-        showPose(result.pose);
-        showLandingZone(result.landing_zone);
-        if (result.frame) {
-            receivedFrame = true;
-            frame = result.frame;
-            get("framePreview").src = frame;
-            get("navFrame").src = frame;
-        } else if (!receivedFrame && performance.now() - start >= CAMERA_WAIT_MS) {
-            throw new Error(CAMERA_UNAVAILABLE);
-        }
-        await pause(180);
-    }
+async function previewLoop() {
+  const t0 = performance.now(); let gotFrame = false;
+  while (live) {
+    const r = await post("/live/preview");
+    if (!live) return;
+    showPose(r.pose); showZone(r.landing_zone);
+    if (r.frame) { gotFrame = true; $("cam").src = r.frame; }
+    else if (!gotFrame && performance.now() - t0 > 12000) throw new Error("The rover camera did not respond.");
+    await pause(180);
+  }
 }
-async function livePosition() {
-    while (liveActive) {
-        const result = await post("/live/match");
-        if (!liveActive) return;
-        if (result.overlay) {
-            get("mapPreview").src = result.overlay;
-            const method = result.mode === "tracking" ? "Optical flow" : "Map match";
-            get("visionStatus").textContent = method + " · " + result.seconds + " s";
-        } else if (!result.waiting) {
-            get("visionStatus").textContent = englishDiagnostic(result.diagnostic);
-        }
-        await pause(250);
-    }
+async function matchLoop() {
+  while (live) {
+    const r = await post("/live/match", undefined, 20000);
+    if (!live) return;
+    if (r.diagnostic) say(r.diagnostic); else if (!r.waiting) say("Tracking · " + (r.mode === "tracking" ? "optical flow" : "map match") + " · " + r.seconds + " s");
+    await pause(250);
+  }
 }
-get("live").onclick = () => {
-    if (liveActive) {
-        liveActive = false;
-        get("live").disabled = true;
-        return;
-    }
-    vision(async () => {
-        if (!reference) throw new Error("Upload a reference map first.");
-        const payload = {map: reference.split(",")[1]};
-        if (landingArea) {
-            payload.landing_zone = {area: landingArea, footprint: get("landingFootprint").valueAsNumber / 100};
-        }
-        await post("/live/start?correct_colors=" + get("correctColors").checked, payload);
-        liveActive = true;
-        get("mapPreview").src = reference;
-        get("navMap").src = reference;
-        get("navFrame").removeAttribute("src");
-        get("liveNavigation").hidden = false;
-        get("heightSetupStatus").textContent = "";
-        get("framePreview").hidden = get("mapPreview").hidden = true;
-        showPose(null);
-        showLandingZone(null);
-        get("live").textContent = "Stop live tracking";
-        get("live").disabled = false;
-        get("visionStatus").textContent = "";
-        try {
-            await Promise.race([livePreview(), livePosition()]);
-            return "Live tracking stopped.";
-        } finally {
-            liveActive = false;
-            get("live").textContent = "Start live tracking";
-            get("liveNavigation").hidden = true;
-            get("framePreview").hidden = get("mapPreview").hidden = false;
-            await post("/live/stop");
-        }
-    });
+$("go").onclick = async () => {
+  if (live) { live = false; $("go").disabled = true; return; }
+  if (busy) return;
+  busy = true; render(); say("Starting the camera…");
+  try {
+    await post("/live/start?correct_colors=" + $("correctColors").checked, {});
+    live = true; busy = false;
+    $("go").textContent = "■ Stop mission"; $("go").classList.add("stop"); render(); $("go").disabled = false;
+    banner("wait", "Mission running · finding the rover on the map…");
+    await Promise.race([previewLoop(), matchLoop()]);
+  } catch (e) { say(e.message, true); }
+  finally {
+    live = false; busy = false; lastZone = null;
+    try { await post("/live/stop"); } catch {}
+    $("go").textContent = "▶ Start mission"; $("go").classList.remove("stop");
+    for (const id of ["target", "alt", "hazard", "rover"]) $(id).hidden = true;
+    $("cam").removeAttribute("src");
+    render();
+  }
 };
 window.addEventListener("pagehide", () => {
-    if (liveActive) navigator.sendBeacon("/live/stop");
+  if (live) navigator.sendBeacon("/live/stop");
+  if (viewing) navigator.sendBeacon("/setup/preview/stop");
 });
+
+// ---------------------------------------------------------------- height + IMU (advanced)
+$("setHeight").onclick = async () => {
+  try { await post("/live/height", {height_m: $("initialHeight").valueAsNumber}); say("Starting height set."); }
+  catch (e) { say(e.message, true); }
+};
 async function refreshImu() {
-    try {
-        const result = await post("/imu");
-        const status = result.status === "ready" ?
-            "Roll " + result.roll + "° · Pitch " + result.pitch + "° · Relative yaw " +
-            result.yaw + "° · Acceleration " + result.acceleration + " m/s²" :
-            result.status === "unavailable" ? "Waiting for the Modulino Movement to respond on I²C." :
-            result.status === "stale" ? "IMU readings are stale." :
-            "Keep the rover still while the IMU calibrates (" + (result.samples || 0) + "/40).";
-        get("imuStatus").textContent = status;
-        get("armLander").disabled = result.status !== "ready" || result.lander_status === "in_air";
-        get("landerStatus").textContent = result.status === "ready" ?
-            {ready: "Ready · Waiting for motion", in_air: "In air", landed: "Landed"}[result.lander_status] :
-            "Waiting for the IMU…";
-    } catch (error) {
-        get("imuStatus").textContent = error.message;
-        get("armLander").disabled = true;
-    }
+  try {
+    const r = await post("/imu");
+    const ready = r.status === "ready";
+    $("imuChip").textContent = ready ? "IMU ready" : r.status === "unavailable" ? "IMU not found" : r.status === "stale" ? "IMU stale" : "IMU calibrating";
+    $("imuChip").classList.toggle("ok", ready);
+    $("imuLine").textContent = ready ? "Roll " + r.roll + "° · Pitch " + r.pitch + "° · Yaw " + r.yaw + "° · " + r.acceleration + " m/s²" :
+      r.status === "unavailable" ? "Waiting for the Modulino Movement on I²C." : r.status === "stale" ? "IMU readings are stale." :
+      "Keep the rover still while the IMU calibrates (" + (r.samples || 0) + "/40).";
+    $("armLander").disabled = !ready || r.lander_status === "in_air";
+    $("landerLine").textContent = ready ? "Lander: " + ({ready: "ready, waiting for motion", in_air: "in the air", landed: "landed"}[r.lander_status] || r.lander_status) : "";
+  } catch { $("imuChip").textContent = "IMU offline"; $("imuChip").classList.remove("ok"); }
 }
-get("calibrateImu").onclick = async () => {
-    await post("/imu/calibrate");
-    await refreshImu();
-};
-refreshImu();
-setInterval(refreshImu, 350);
-get("armLander").onclick = async () => {
-    get("armLander").disabled = true;
-    try {
-        await post("/lander/arm");
-        await refreshImu();
-    } catch (error) {
-        get("landerStatus").textContent = error.message;
-    }
-};
+$("calibrateImu").onclick = async () => { await post("/imu/calibrate").catch(() => {}); refreshImu(); };
+$("armLander").onclick = async () => { try { await post("/lander/arm"); } catch (e) { say(e.message, true); } refreshImu(); };
+refreshImu(); setInterval(refreshImu, 700);
+loadSetup();
 </script>
 </html>

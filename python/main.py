@@ -1,5 +1,9 @@
 import base64
+import binascii
+import json
 import math
+import os
+from pathlib import Path
 from hashlib import sha256
 from threading import Event, Lock, Thread
 from time import monotonic, sleep
@@ -12,7 +16,7 @@ from fastapi.responses import JSONResponse
 from arduino.app_bricks.web_ui import WebUI
 from arduino.app_peripherals.camera import Camera
 from arduino.app_utils import App, Bridge
-from camera_color import encode_camera_frame
+from camera_color import balance_colors, encode_camera_frame
 from imu import Attitude
 from landing_zone import LandingZone
 from map_height import estimate_height
@@ -200,12 +204,14 @@ class LiveSession:
         if self.landing_zone is None:
             return None
         reading = self.zone_reading
-        if reading is None or monotonic() - reading[0] > 1.25:
+        # A match takes ~0.7 s on the Uno Q plus HTTP latency, so 1.25 s made the zone flicker.
+        if reading is None or monotonic() - reading[0] > ZONE_FRESH_S:
             result = {"status": "unknown", "target": None, "alternative": None,
                       "reason": "Waiting for a fresh camera match."}
         else:
             result = reading[1]
-        return {**result, "area": self.landing_zone.area, "footprint": self.landing_zone.footprint}
+        return {**result, "hazard": self.landing_zone.hazard,
+                "area": self.landing_zone.area, "footprint": self.landing_zone.footprint}
 
     def pose_snapshot(self):
         pose = self.pose.snapshot(attitude.snapshot())
@@ -339,19 +345,340 @@ class LiveSession:
                 self.matcher.prepare()
 
 
+# ---------------------------------------------------------------- saved setup (persists across reloads/restarts)
+# The reference map and the landing site live on the board until the user replaces them.
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+ZONE_FRESH_S = 4.0                         # how long a landing-zone reading stays valid
+MAP_FILE = DATA_DIR / "map.img"            # original bytes (keeps the map hash used by HEIGHT_CALIBRATIONS)
+ZONE_FILE = DATA_DIR / "landing_zone.json"
+CROPPED_FLAG = DATA_DIR / "map.cropped"       # present once the saved map was trimmed to the board
+REGION_FILE = DATA_DIR / "region.json"       # Plan Banana region (Z1/Z2) laid over the board
+
+
+def _write_atomic(path, data):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def saved_map_bytes():
+    try:
+        return MAP_FILE.read_bytes()
+    except OSError:
+        return None
+
+
+def saved_zone():
+    try:
+        return json.loads(ZONE_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def saved_region():
+    try:
+        return json.loads(REGION_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def detect_board(image):
+    """Normalised [left, top, right, bottom] of the bright foam board on a darker background."""
+    gray = cv.GaussianBlur(cv.cvtColor(image, cv.COLOR_BGR2GRAY), (9, 9), 0)
+    _, mask = cv.threshold(gray, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)
+    mask = cv.morphologyEx(mask, cv.MORPH_OPEN, cv.getStructuringElement(cv.MORPH_ELLIPSE, (15, 15)))
+    contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    height, width = gray.shape
+    if contours:
+        x, y, w, h = cv.boundingRect(max(contours, key=cv.contourArea))
+        if w * h > 0.15 * width * height:
+            return [x / width, y / height, (x + w) / width, (y + h) / height]
+    return [0.0, 0.0, 1.0, 1.0]
+
+
+def region_to_map(region, board, shape, rotation_deg=0.0):
+    """Place zones on the board. The region square IS the board (axis-aligned); rotation_deg turns only the
+    north direction (clockwise from up). Zones are clamped onto the board; a zone the user dragged keeps
+    its dragged position ("override")."""
+    height, width = shape[:2]
+    size_m = float(region.get("region_size_km", 15.0)) * 1000.0
+    left, top, right, bottom = board
+    bw, bh = (right - left) * width, (bottom - top) * height
+    cx, cy = left * width + bw / 2, top * height + bh / 2
+    theta = math.radians(rotation_deg)
+    north = (math.sin(theta), -math.cos(theta))                  # image x right, y down
+    east = (math.cos(theta), math.sin(theta))
+    inset = 0.04
+    zones = []
+    for zone in region.get("zones", []):
+        e, n = float(zone["east_m"]), float(zone["north_m"])
+        u = 0.5 + (e * east[0] + n * north[0]) / size_m          # 0..1 across the board
+        v = 0.5 + (e * east[1] + n * north[1]) / size_m
+        u, v = min(1 - inset, max(inset, u)), min(1 - inset, max(inset, v))
+        x_norm, y_norm = left + u * (right - left), top + v * (bottom - top)
+        if zone.get("override"):
+            x_norm, y_norm = map(float, zone["override"])
+        zones.append({**zone, "x_norm": x_norm, "y_norm": y_norm,
+                      "r_norm": min(0.12, float(zone.get("margin_m", 500.0)) / size_m * bw / width)})
+    square = {"x_norm": cx / width, "y_norm": cy / height, "w_norm": bw / width, "h_norm": bh / height, "angle": 0.0}
+    return zones, square
+
+
+def save_region(payload: dict):
+    """Store a Plan Banana region summary and make its rank-1 zone the planned landing site."""
+    try:
+        payload = payload if isinstance(payload, dict) else {}
+        if "region" not in payload and ("rotation_deg" in payload or "move" in payload or "replace" in payload):
+            region = saved_region()                             # re-place the saved region (rotate / drag / new map)
+            if region is None:
+                raise ValueError("Import a region first.")
+            if "rotation_deg" in payload:
+                for z in region["zones"]:
+                    z.pop("override", None)                     # a new north direction re-places every zone
+            move = payload.get("move")
+            if move:
+                x, y = float(move["x_norm"]), float(move["y_norm"])
+                if not (0 <= x <= 1 and 0 <= y <= 1):
+                    raise ValueError("Drop the zone on the map.")
+                for z in region["zones"]:
+                    if z.get("id") == move.get("id"):
+                        z["override"] = [round(x, 5), round(y, 5)]
+        else:
+            region = payload.get("region")
+        if region is None:
+            REGION_FILE.unlink(missing_ok=True)
+            return {"saved": True, "region": None}
+        if isinstance(region, str):
+            region = json.loads(region)
+        zones = region["zones"]
+        if not isinstance(zones, list) or not zones:
+            raise ValueError("The region has no landing zones.")
+        for zone in zones:
+            float(zone["east_m"]), float(zone["north_m"])
+        data = saved_map_bytes()
+        if data is None:
+            raise ValueError("Save a map first.")
+        image = decode_image(data)
+        board = detect_board(image)
+        rotation = float(payload.get("rotation_deg", region.get("rotation_deg", 0.0))) % 360
+        placed, square = region_to_map(region, board, image.shape, rotation)
+        primary = min(placed, key=lambda z: z.get("rank", 99))
+        footprint = float(payload.get("footprint", (saved_zone() or {}).get("footprint", 0.10)))
+        half = min(0.2, max(primary["r_norm"], footprint * 0.9))
+        area = [max(0.0, primary["x_norm"] - half), max(0.0, primary["y_norm"] - half),
+                min(1.0, primary["x_norm"] + half), min(1.0, primary["y_norm"] + half)]
+        zone_settings = {"area": [round(v, 5) for v in area], "footprint": round(footprint, 5)}
+        LandingZone(image, zone_settings)                     # validate like a live start
+        stored = {"name": region.get("name"), "id": region.get("id"), "region_size_km": region.get("region_size_km", 15.0),
+                  "optimal_touchdown_utc": region.get("optimal_touchdown_utc"), "board": [round(v, 5) for v in board],
+                  "rotation_deg": round(rotation, 2), "square": square,
+                  "zones": [{k: z.get(k) for k in ("id", "rank", "east_m", "north_m", "margin_m", "mean_success",
+                                                   "target_success", "from_primary", "x_norm", "y_norm", "r_norm",
+                                                   "override")}
+                            for z in placed]}
+        _write_atomic(REGION_FILE, json.dumps(stored).encode())
+        _write_atomic(ZONE_FILE, json.dumps(zone_settings).encode())
+        return {"saved": True, "region": stored, "landing_zone": zone_settings}
+    except (ValueError, KeyError, TypeError, OSError, cv.error) as error:
+        return JSONResponse({"error": f"Could not use this region: {error}"}, 422)
+
+
+def get_setup():
+    data = saved_map_bytes()
+    mime = "image/png" if data and data[:4] == b"\x89PNG" else "image/jpeg"
+    return JSONResponse({
+        "map": f"data:{mime};base64," + base64.b64encode(data).decode("ascii") if data else None,
+        "map_saved_at": MAP_FILE.stat().st_mtime if data else None,
+        "landing_zone": saved_zone(),
+        "region": saved_region(),
+        "cropped": CROPPED_FLAG.exists(),
+    }, headers={"Cache-Control": "no-store"})
+
+
+def _store_map(data):
+    decode_image(data)                       # validates JPG/PNG and size
+    _write_atomic(MAP_FILE, data)
+    for stale in (ZONE_FILE, REGION_FILE, CROPPED_FLAG):   # the old landing site / region placement belong to the old map
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+    return {"saved": True, "map": jpeg_url(data) if data[:4] != b"\x89PNG" else
+            "data:image/png;base64," + base64.b64encode(data).decode("ascii")}
+
+
+def save_map(payload: dict):
+    try:
+        return _store_map(base64.b64decode(payload["map"], validate=True))
+    except (KeyError, TypeError, ValueError, binascii.Error, OSError) as error:
+        return JSONResponse({"error": str(error)}, 422)
+
+
+class MapPreview:
+    """Lightweight camera stream for lining up the map photo (no map matching)."""
+
+    def __init__(self):
+        self.stop = Event()
+        self.raw = None
+        self.error = None
+        self.last_seen = monotonic()
+
+    def run(self):
+        try:
+            camera = Camera(resolution=CAPTURE_RESOLUTION)
+            try:
+                camera.start()
+                ready_at = monotonic() + 1.0
+                while not self.stop.is_set() and monotonic() - self.last_seen < 20:
+                    frame = camera.capture()
+                    if frame is not None and monotonic() >= ready_at:
+                        self.raw = frame
+                    self.stop.wait(0.12)
+            finally:
+                camera.stop()
+        except Exception as error:
+            self.error = str(error)
+        finally:
+            self.stop.set()
+            camera_lock.release()
+
+
+map_preview = None
+
+
+def _preview_active():
+    return map_preview is not None and not map_preview.stop.is_set()
+
+
+def _stop_preview_and_wait(timeout=4.0):
+    """Stop the map preview (if any) and take the camera lock. Returns True when the lock is held."""
+    if _preview_active():
+        map_preview.stop.set()
+    return camera_lock.acquire(timeout=timeout)
+
+
+def preview_start():
+    global map_preview
+    if live_session is not None and not live_session.stop.is_set():
+        return JSONResponse({"error": "Stop the mission before opening the live view."}, 409)
+    if _preview_active():
+        map_preview.last_seen = monotonic()
+        return {"started": True}
+    if not camera_lock.acquire(timeout=3):
+        return JSONResponse({"error": "The camera is busy. Try again in a moment."}, 409)
+    map_preview = MapPreview()
+    Thread(target=map_preview.run, daemon=True).start()
+    return {"started": True}
+
+
+def preview_frame(correct_colors: bool = True):
+    session = map_preview
+    if session is None or session.stop.is_set():
+        return JSONResponse({"error": (session.error if session else None) or "Live view stopped."}, 409)
+    session.last_seen = monotonic()
+    raw = session.raw
+    if raw is None:
+        return {"frame": None}
+    image = cv.cvtColor(raw, cv.COLOR_BGRA2BGR) if raw.ndim == 3 and raw.shape[2] == 4 else raw
+    small = cv.resize(image, None, fx=0.5, fy=0.5, interpolation=cv.INTER_AREA)
+    if correct_colors and small.ndim == 3:
+        small = balance_colors(small)
+    ok, jpeg = cv.imencode(".jpg", small, [cv.IMWRITE_JPEG_QUALITY, 78])
+    return {"frame": jpeg_url(jpeg.tobytes())} if ok else {"frame": None}
+
+
+def preview_stop():
+    if map_preview is not None:
+        map_preview.stop.set()
+    return {"stopped": True}
+
+
+def crop_map_to_board():
+    """Trim the saved map to the detected board so the surroundings play no part; keep the region."""
+    try:
+        data = saved_map_bytes()
+        if data is None:
+            raise ValueError("Save a map first.")
+        image = decode_image(data)
+        height, width = image.shape[:2]
+        left, top, right, bottom = detect_board(image)
+        if CROPPED_FLAG.exists() or (right - left > 0.97 and bottom - top > 0.97):
+            raise ValueError("The map already shows only the board.")
+        pad = 0.01
+        x0, y0 = int(max(0, left - pad) * width), int(max(0, top - pad) * height)
+        x1, y1 = int(min(1, right + pad) * width), int(min(1, bottom + pad) * height)
+        ok, jpeg = cv.imencode(".jpg", image[y0:y1, x0:x1], [cv.IMWRITE_JPEG_QUALITY, 95])
+        if not ok:
+            raise ValueError("Could not encode the cropped map.")
+        region = saved_region()
+        footprint = (saved_zone() or {}).get("footprint", 0.10)
+        result = _store_map(jpeg.tobytes())                      # clears zone + region files
+        _write_atomic(CROPPED_FLAG, b"1")
+        if region is not None:
+            for z in region["zones"]:
+                if z.get("override"):                            # move dragged positions into the cropped frame
+                    ox, oy = z["override"]
+                    z["override"] = [round((ox * width - x0) / (x1 - x0), 5), round((oy * height - y0) / (y1 - y0), 5)]
+            placed = save_region({"region": region, "rotation_deg": region.get("rotation_deg", 0.0), "footprint": footprint})
+            if isinstance(placed, dict):
+                result.update(region=placed["region"], landing_zone=placed["landing_zone"])
+        return result
+    except (ValueError, OSError, cv.error) as error:
+        return JSONResponse({"error": str(error)}, 422)
+
+
+def save_map_from_camera(correct_colors: bool = True):
+    if live_session is not None and not live_session.stop.is_set():
+        return JSONResponse({"error": "Stop the mission before taking a new map photo."}, 409)
+    try:
+        if _preview_active() and map_preview.raw is not None:
+            data = encode_camera_frame(map_preview.raw, correct_colors)   # exactly the frame on screen
+            map_preview.stop.set()
+            return _store_map(data)
+        if _preview_active():
+            map_preview.stop.set()
+        return _store_map(capture_frame(correct_colors))
+    except Exception as error:
+        return JSONResponse({"error": str(error)}, 503)
+
+
+def save_zone(payload: dict):
+    zone = payload.get("landing_zone") if isinstance(payload, dict) else None
+    try:
+        if zone is None:
+            ZONE_FILE.unlink(missing_ok=True)
+            return {"saved": True, "landing_zone": None}
+        data = saved_map_bytes()
+        if data is None:
+            raise ValueError("Save a map first.")
+        LandingZone(decode_image(data), zone)          # same validation as a live start
+        clean = {"area": [round(float(v), 5) for v in zone["area"]], "footprint": round(float(zone["footprint"]), 5)}
+        _write_atomic(ZONE_FILE, json.dumps(clean).encode())
+        return {"saved": True, "landing_zone": clean}
+    except (ValueError, KeyError, TypeError, OSError, cv.error) as error:
+        return JSONResponse({"error": str(error)}, 422)
+
+
 live_session = None
 
 
 def start_live(payload: dict, correct_colors: bool = True):
     global live_session
     try:
-        map_bytes = base64.b64decode(payload["map"], validate=True)
+        payload = payload if isinstance(payload, dict) else {}
+        if payload.get("map"):
+            map_bytes = base64.b64decode(payload["map"], validate=True)
+        else:
+            map_bytes = saved_map_bytes()
+            if map_bytes is None:
+                raise ValueError("No saved map. Take or upload a map photo first.")
         reference = decode_image(map_bytes)
-        zone_settings = payload.get("landing_zone")
+        zone_settings = payload["landing_zone"] if "landing_zone" in payload else saved_zone()
         landing_zone = LandingZone(reference, zone_settings) if zone_settings is not None else None
     except (ValueError, KeyError, TypeError, cv.error) as error:
         return JSONResponse({"error": str(error)}, 422)
-    if not camera_lock.acquire(blocking=False):
+    if not _stop_preview_and_wait():
         return JSONResponse({"error": "La camera ? occupata."}, 409)
     live_session = LiveSession(reference, correct_colors, sha256(map_bytes).hexdigest())
     live_session.landing_zone = landing_zone
@@ -464,6 +791,15 @@ ui.expose_api("POST", "/capture", capture)
 ui.expose_api("POST", "/map", downloaded_map)
 ui.expose_api("POST", "/match", match)
 ui.expose_api("POST", "/landing", capture_landing)
+ui.expose_api("GET", "/setup", get_setup)
+ui.expose_api("POST", "/setup/map", save_map)
+ui.expose_api("POST", "/setup/map/camera", save_map_from_camera)
+ui.expose_api("POST", "/setup/zone", save_zone)
+ui.expose_api("POST", "/setup/region", save_region)
+ui.expose_api("POST", "/setup/map/crop", crop_map_to_board)
+ui.expose_api("POST", "/setup/preview/start", preview_start)
+ui.expose_api("POST", "/setup/preview", preview_frame)
+ui.expose_api("POST", "/setup/preview/stop", preview_stop)
 
 
 def read_attitude():
