@@ -111,11 +111,11 @@ Example response:
 
 ## OLED landing status
 
-With the rover at rest, wait for IMU calibration and press **Arm landing
-detection** just before the bench descent. The OLED shows READY before arming,
-IN AIR after arming, and LANDED after detected motion followed by two continuous
-seconds near local gravity and low angular rate. LANDED stays latched until
-the next arming. The web dashboard reports the same lander state.
+Keep the rover still until IMU calibration finishes. The OLED shows READY
+until the IMU detects 0.25 seconds of sustained motion, then IN AIR. After
+two continuous seconds of low linear acceleration and low angular rate it
+shows LANDED. Sustained motion after landing switches it back to IN AIR.
+The dashboard reports the same state and offers manual arming for bench tests.
 
 The IMU rule estimates touchdown from motion and settling. Hovering or a
 pause in motion can produce the same readings as rest on a surface. Ground

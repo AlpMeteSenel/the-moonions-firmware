@@ -62,7 +62,7 @@ img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-
 </section>
 <section>
 <h2>Lander status</h2>
-<button id="armLander" disabled>Arm landing detection</button>
+<button id="armLander" disabled>Arm landing detection manually</button>
 <output id="landerStatus" aria-live="polite">Waiting for the IMU…</output>
 <button id="calibrateImu">Calibrate IMU while stationary</button>
 <output id="imuStatus" aria-live="polite"></output>
@@ -335,7 +335,7 @@ async function refreshImu() {
         get("imuStatus").textContent = status;
         get("armLander").disabled = result.status !== "ready" || result.lander_status === "in_air";
         get("landerStatus").textContent = result.status === "ready" ?
-            {ready: "Ready", in_air: "In air", landed: "Landed"}[result.lander_status] :
+            {ready: "Ready · Waiting for motion", in_air: "In air", landed: "Landed"}[result.lander_status] :
             "Waiting for the IMU…";
     } catch (error) {
         get("imuStatus").textContent = error.message;
