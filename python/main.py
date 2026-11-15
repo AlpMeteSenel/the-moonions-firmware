@@ -184,6 +184,14 @@ class LiveSession:
         self.last_fix = 0
         self.pose = MapPose()
 
+    def pose_snapshot(self):
+        pose = self.pose.snapshot(attitude.snapshot())
+        if pose["tracking_status"] != "waiting":
+            pose["x_norm"] = pose["x_px"] / self.map_info["width_px"]
+            pose["y_norm"] = pose["y_px"] / self.map_info["height_px"]
+        pose["height_calibrated"] = self.height_calibration is not None
+        return pose
+
     def locate(self, frame, timestamp):
         # Keep the full field of view and bound the per-frame workload for live mode.
         height, width = frame.shape[:2]
@@ -301,21 +309,24 @@ def live_preview():
     snapshot = session.frame
     return {
         "frame": jpeg_url(snapshot[1]) if snapshot else None,
-        "pose": session.pose.snapshot(attitude.snapshot()),
+        "pose": session.pose_snapshot(),
     }
 
 
 def get_map_pose():
     session = live_session
     active = session is not None and not session.stop.is_set()
-    pose = session.pose.snapshot(attitude.snapshot()) if active else {"tracking_status": "inactive"}
+    pose = session.pose_snapshot() if active else {"tracking_status": "inactive"}
     source = pose.get("heading_source")
     return JSONResponse({
         "map": session.map_info if active else None,
         "tracking_status": pose["tracking_status"],
         "x_px": pose.get("x_px"),
         "y_px": pose.get("y_px"),
+        "x_norm": pose.get("x_norm"),
+        "y_norm": pose.get("y_norm"),
         "z_m": pose.get("z_m"),
+        "height_calibrated": pose.get("height_calibrated"),
         "frame_age_ms": pose.get("frame_age_ms"),
         "heading_deg": pose.get("heading_deg"),
         "heading_source": source,

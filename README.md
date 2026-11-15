@@ -80,6 +80,10 @@ Example response:
   "tracking_status": "stale",
   "x_px": 924.8,
   "y_px": 423.6,
+  "x_norm": 0.7225,
+  "y_norm": 0.44125,
+  "z_m": null,
+  "height_calibrated": false,
   "frame_age_ms": 1650,
   "heading_deg": 10.3,
   "heading_source": "camera_imu",
@@ -87,9 +91,10 @@ Example response:
 }
 ```
 
-- Coordinates use the reference image's top-left origin. X increases to the
-  right and Y down. For a scaled display, use x_px / width_px and
-  y_px / height_px as the marker proportions. Heading is clockwise from image-up.
+- Use `x_norm` and `y_norm` to place the marker on the complete reference image.
+  They are fractions from 0 to 1, with (0, 0) at the top left and (1, 1) at
+  the bottom right. Pixel coordinates remain available as `x_px` and `y_px`.
+  Heading is clockwise from image-up.
 - imu_estimated is 0 for a camera-anchored heading, 1 when a newer IMU
   sample propagates heading from the last camera anchor, and null when
   heading is unavailable. Position always comes from the camera.
@@ -115,8 +120,10 @@ contact confirmation requires another measurement.
 
 ### Height above the map
 
-The pose response also includes `z_m`, the estimated distance in meters from
-the camera center to the mapped surface. X and Y still use map pixels.
+The pose response includes `z_m`, the estimated distance in meters from
+the camera center to the mapped surface. The live dashboard shows it directly
+under the position. `height_calibrated` indicates whether the selected map
+has a matching calibration.
 Set `HEIGHT_CALIBRATION` in `python/main.py` to a tuple of the map ID from the
 API, the map scale in meters per pixel, and `(fx, fy, cx, cy)` measured at
 1280 × 960 in the camera's capture mode. Use a flat, orthorectified map with

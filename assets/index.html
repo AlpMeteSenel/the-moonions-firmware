@@ -45,6 +45,7 @@ img:not([src]){display:none} output{display:block;margin:10px 0;white-space:pre-
   <div class="nav-view">
     <h3>Rover position</h3>
     <output id="poseStatus" class="nav-status">Waiting for the camera…</output>
+    <output id="heightStatus" class="nav-status">Height · Waiting for a pose</output>
     <div class="nav-stage">
       <img id="navMap" alt="Reference map">
       <div id="roverPoint" class="rover-point" hidden><span id="roverHeading" class="rover-heading"></span></div>
@@ -200,14 +201,22 @@ function showPose(pose) {
     const status = get("poseStatus");
     const state = pose?.tracking_status ?? "waiting";
     status.dataset.state = marker.dataset.state = state;
+    const height = get("heightStatus");
+    if (pose?.z_m != null) {
+        height.textContent = (state === "stale" ? "Last known height" : "Estimated height") +
+            " · " + pose.z_m.toFixed(3) + " m above map";
+    } else {
+        height.textContent = "Height · " + (pose?.height_calibrated === false ?
+            "Map scale and camera calibration required" : "Waiting for a reliable height estimate");
+    }
     const map = get("navMap");
-    marker.hidden = state === "waiting" || !map.naturalWidth;
+    marker.hidden = pose?.x_norm == null || pose.y_norm == null || !map.naturalWidth;
     if (marker.hidden) {
         status.textContent = "Waiting for a camera position…";
         return;
     }
-    marker.style.left = 100 * pose.x_px / map.naturalWidth + "%";
-    marker.style.top = 100 * pose.y_px / map.naturalHeight + "%";
+    marker.style.left = 100 * pose.x_norm + "%";
+    marker.style.top = 100 * pose.y_norm + "%";
     heading.hidden = pose.heading_deg === null;
     heading.style.transform = heading.hidden ? "" : "rotate(" + pose.heading_deg + "deg)";
     const label = {
@@ -217,7 +226,7 @@ function showPose(pose) {
     }[state];
     const source = pose.heading_source === "camera_imu" ?
         (state === "stale" ? "IMU heading" : "Camera + IMU heading") : "Camera heading";
-    status.textContent = label + " · " + pose.x_px + ", " + pose.y_px + " px" +
+    status.textContent = label + " · X " + pose.x_norm.toFixed(4) + " · Y " + pose.y_norm.toFixed(4) +
         (state === "stale" ? " · " + (pose.frame_age_ms / 1000).toFixed(1) + " s ago" : "") +
         (heading.hidden ? "" : " · " + source + " " + pose.heading_deg + "°");
 }
