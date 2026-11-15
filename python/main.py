@@ -325,6 +325,8 @@ def get_map_pose():
     active = session is not None and not session.stop.is_set()
     pose = session.pose_snapshot() if active else {"tracking_status": "inactive"}
     source = pose.get("heading_source")
+    height_source = pose.get("height_source")
+    uses_imu = source == "camera_imu" or height_source == "imu"
     return JSONResponse({
         "map": session.map_info if active else None,
         "tracking_status": pose["tracking_status"],
@@ -333,11 +335,13 @@ def get_map_pose():
         "x_norm": pose.get("x_norm"),
         "y_norm": pose.get("y_norm"),
         "z_m": pose.get("z_m"),
+        "height_source": height_source,
+        "height_age_ms": pose.get("height_age_ms"),
         "height_calibrated": pose.get("height_calibrated"),
         "frame_age_ms": pose.get("frame_age_ms"),
         "heading_deg": pose.get("heading_deg"),
         "heading_source": source,
-        "imu_estimated": None if source is None else int(source == "camera_imu"),
+        "imu_estimated": None if source is None and height_source is None else int(uses_imu),
     }, headers={"Cache-Control": "no-store"})
 
 

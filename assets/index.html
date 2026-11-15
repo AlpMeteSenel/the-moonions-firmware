@@ -203,8 +203,13 @@ function showPose(pose) {
     status.dataset.state = marker.dataset.state = state;
     const height = get("heightStatus");
     if (pose?.z_m != null) {
-        height.textContent = (state === "stale" ? "Last known height" : "Estimated height") +
-            " · " + pose.z_m.toFixed(3) + " m above map";
+        const heightLabel = {
+            camera: "Camera height",
+            imu: "IMU estimated height",
+            last_camera: "Last camera height"
+        }[pose.height_source];
+        height.textContent = heightLabel + " · " + pose.z_m.toFixed(3) + " m above map" +
+            (pose.height_source === "last_camera" ? " · " + (pose.height_age_ms / 1000).toFixed(1) + " s ago" : "");
     } else {
         height.textContent = "Height · " + (pose?.height_calibrated === false ?
             "Map scale and camera calibration required" : "Waiting for a reliable height estimate");

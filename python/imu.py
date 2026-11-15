@@ -30,6 +30,13 @@ class Attitude:
             self.result = {"status": "waiting"}
             self.observed_motion = False
             self.settled_seconds = 0.0
+            self._reset_vertical_motion()
+
+    def _reset_vertical_motion(self):
+        self.vertical_time = 0.0
+        self.vertical_velocity = 0.0
+        self.vertical_displacement = 0.0
+        self.previous_vertical_acceleration = None
 
     def arm_landing(self):
         with self.lock:
@@ -62,6 +69,7 @@ class Attitude:
                 self.timestamp = None
                 self.samples.clear()
                 self.settled_seconds = 0.0
+                self._reset_vertical_motion()
                 return
             tick, *data = map(float, packet.split(","))
             acceleration = SENSOR_TO_ROVER @ np.array(data[:3]) * STANDARD_G
@@ -92,6 +100,7 @@ class Attitude:
             self.sampled_at = monotonic()
             if dt >= 0.25:
                 self.epoch += 1
+                self._reset_vertical_motion()
             if 0 < dt < 0.25:
                 omega = np.deg2rad(rates - self.bias)
                 if abs(magnitude * self.scale - LOCAL_GRAVITY) < 0.12 * LOCAL_GRAVITY:
@@ -99,6 +108,15 @@ class Attitude:
                 self.rotation = self.rotation @ cv.Rodrigues(omega * dt)[0]
             self._update_landing(dt, magnitude * self.scale, np.linalg.norm(rates - self.bias))
             r = self.rotation
+            vertical_acceleration = float(r[2] @ acceleration) * self.scale - LOCAL_GRAVITY
+            if 0 < dt < 0.25 and self.previous_vertical_acceleration is not None:
+                next_velocity = self.vertical_velocity + (
+                    self.previous_vertical_acceleration + vertical_acceleration
+                ) * dt / 2
+                self.vertical_displacement += (self.vertical_velocity + next_velocity) * dt / 2
+                self.vertical_velocity = next_velocity
+                self.vertical_time += dt
+            self.previous_vertical_acceleration = vertical_acceleration
             self.result = {
                 "status": "ready",
                 "epoch": self.epoch,
@@ -107,6 +125,7 @@ class Attitude:
                 "pitch": round(math.degrees(math.atan2(-r[2, 0], math.hypot(r[2, 1], r[2, 2]))), 1),
                 "yaw": round(math.degrees(math.atan2(r[1, 0], r[0, 0])), 1),
                 "acceleration": round(float(magnitude * self.scale), 2),
+                "vertical_motion": (self.vertical_time, self.vertical_velocity, self.vertical_displacement),
             }
 
     def snapshot(self):

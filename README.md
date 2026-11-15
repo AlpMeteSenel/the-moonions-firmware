@@ -83,6 +83,8 @@ Example response:
   "x_norm": 0.7225,
   "y_norm": 0.44125,
   "z_m": null,
+  "height_source": null,
+  "height_age_ms": null,
   "height_calibrated": false,
   "frame_age_ms": 1650,
   "heading_deg": 10.3,
@@ -95,9 +97,9 @@ Example response:
   They are fractions from 0 to 1, with (0, 0) at the top left and (1, 1) at
   the bottom right. Pixel coordinates remain available as `x_px` and `y_px`.
   Heading is clockwise from image-up.
-- imu_estimated is 0 for a camera-anchored heading, 1 when a newer IMU
-  sample propagates heading from the last camera anchor, and null when
-  heading is unavailable. Position always comes from the camera.
+- `imu_estimated` is 1 when the IMU propagates heading or height, 0 when
+  the available heading or height comes from a camera anchor, and null
+  when both heading and height are unavailable. X and Y come from the camera.
 - tracking_status is valid for a fresh visual pose, tentative for a
   low-confidence visual pose, stale for the last known visual position,
   waiting before the first usable pose, or inactive when live tracking is off.
@@ -129,8 +131,14 @@ API, the map scale in meters per pixel, and `(fx, fy, cx, cy)` measured at
 1280 × 960 in the camera's capture mode. Use a flat, orthorectified map with
 uniform scale and a camera with negligible residual lens distortion.
 The estimate uses the visual homography and returns null without matching
-calibration or adequate visual geometry. For stale fixes, any height is also
-last known. Subtract the camera's height above the lander reference point
+calibration or an earlier reliable visual height. During a brief camera
+dropout, the app projects IMU acceleration onto the vertical axis, subtracts
+gravity, and integrates from the most recent visual height and vertical
+speed. Expiry or a gap in IMU readings returns the last camera height.
+`height_source` is `camera`, `imu`, `last_camera`, or null. `height_age_ms`
+reports the age of the visual height anchor. The IMU estimate is limited to
+two seconds from that anchor because acceleration and tilt errors drift.
+Subtract the camera's height above the lander reference point
 when appropriate for the mounted orientation.
 
 The included bench calibration applies to the exact `download (7).jpg` image.
