@@ -206,10 +206,12 @@ function showPose(pose) {
         const heightLabel = {
             camera: "Camera height",
             imu: "IMU estimated height",
+            last_imu: "Last IMU height",
             last_camera: "Last camera height"
         }[pose.height_source];
         height.textContent = heightLabel + " · " + pose.z_m.toFixed(3) + " m above map" +
-            (pose.height_source === "last_camera" ? " · " + (pose.height_age_ms / 1000).toFixed(1) + " s ago" : "");
+            (pose.height_source.startsWith("last_") ?
+                " · " + (pose.height_estimate_age_ms / 1000).toFixed(1) + " s ago" : "");
     } else {
         height.textContent = "Height · " + (pose?.height_calibrated === false ?
             "Map scale and camera calibration required" : "Waiting for a reliable height estimate");

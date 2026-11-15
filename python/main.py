@@ -205,6 +205,8 @@ class LiveSession:
         scale = min(1, 640 / max(height, width))
         view = cv.resize(frame, None, fx=scale, fy=scale, interpolation=cv.INTER_AREA)
         gray = cv.cvtColor(view, cv.COLOR_BGR2GRAY)
+        if np.percentile(gray[::4, ::4], 99) < 12:
+            raise ValueError("Camera view is too dark for map matching.")
         if self.tracking is not None and timestamp - self.last_fix < 5:
             previous_time, previous, points, transform, tentative = self.tracking
             if timestamp - previous_time < 1.5:
@@ -326,7 +328,7 @@ def get_map_pose():
     pose = session.pose_snapshot() if active else {"tracking_status": "inactive"}
     source = pose.get("heading_source")
     height_source = pose.get("height_source")
-    uses_imu = source == "camera_imu" or height_source == "imu"
+    uses_imu = source == "camera_imu" or height_source in {"imu", "last_imu"}
     return JSONResponse({
         "map": session.map_info if active else None,
         "tracking_status": pose["tracking_status"],
@@ -337,6 +339,7 @@ def get_map_pose():
         "z_m": pose.get("z_m"),
         "height_source": height_source,
         "height_age_ms": pose.get("height_age_ms"),
+        "height_estimate_age_ms": pose.get("height_estimate_age_ms"),
         "height_calibrated": pose.get("height_calibrated"),
         "frame_age_ms": pose.get("frame_age_ms"),
         "heading_deg": pose.get("heading_deg"),
@@ -388,6 +391,9 @@ def read_attitude():
         sleep(0.5)
 
     reading = attitude.snapshot()
+    session = live_session
+    if session is not None and not session.stop.is_set():
+        session.pose.update_imu(reading)
     if reading["status"] == "ready":
         display_status = reading["lander_status"].replace("_", " ").upper()
     elif reading["status"] in {"unavailable", "stale"}:

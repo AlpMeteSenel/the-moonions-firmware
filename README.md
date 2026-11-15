@@ -97,7 +97,8 @@ Example response:
   They are fractions from 0 to 1, with (0, 0) at the top left and (1, 1) at
   the bottom right. Pixel coordinates remain available as `x_px` and `y_px`.
   Heading is clockwise from image-up.
-- `imu_estimated` is 1 when the IMU propagates heading or height, 0 when
+- `imu_estimated` is 1 when the IMU propagates heading or supplies the current
+  or last known height, 0 when
   the available heading or height comes from a camera anchor, and null
   when both heading and height are unavailable. X and Y come from the camera.
 - tracking_status is valid for a fresh visual pose, tentative for a
@@ -134,10 +135,12 @@ The estimate uses the visual homography and returns null without matching
 calibration or an earlier reliable visual height. During a brief camera
 dropout, the app projects IMU acceleration onto the vertical axis, subtracts
 gravity, and integrates from the most recent visual height and vertical
-speed. Expiry or a gap in IMU readings returns the last camera height.
-`height_source` is `camera`, `imu`, `last_camera`, or null. `height_age_ms`
-reports the age of the visual height anchor. The IMU estimate is limited to
-two seconds from that anchor because acceleration and tilt errors drift.
+speed. Touchdown, expiry, or a gap in readings holds the last IMU height
+when available. `height_source` is `camera`, `imu`, `last_imu`,
+`last_camera`, or null. `height_age_ms` reports the age of the visual
+anchor and `height_estimate_age_ms` reports the age of the displayed estimate.
+The IMU estimate is limited to four seconds from the visual anchor because
+acceleration and tilt errors drift. Live tracking skips nearly black frames.
 Subtract the camera's height above the lander reference point
 when appropriate for the mounted orientation.
 
