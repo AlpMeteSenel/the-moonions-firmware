@@ -20,8 +20,15 @@ from matching import MapMatcher, draw_projection
 
 # Optional. Edit in App Lab, then Stop and Run again.
 MAP_URL = ""
-# Set to (map SHA-256, meters per pixel, (fx, fy, cx, cy) at CAPTURE_RESOLUTION).
-HEIGHT_CALIBRATION = None
+# Bench map download (7).jpg. The upper-right 30 mm wheel spans about 97 px.
+# The reference was captured at roughly 0.50 m, assuming a near-overhead view.
+BENCH_MAP_METERS_PER_PIXEL = 0.030 / 97
+BENCH_FOCAL_LENGTH_PX = 0.50 / BENCH_MAP_METERS_PER_PIXEL
+HEIGHT_CALIBRATION = (
+    "678543fb811057ac309efc4dd657305943b579091c46f165649e5126ccbe424b",
+    BENCH_MAP_METERS_PER_PIXEL,
+    (BENCH_FOCAL_LENGTH_PX, BENCH_FOCAL_LENGTH_PX, 639.5, 479.5),
+)
 cv.setNumThreads(2)
 CAPTURE_RESOLUTION = (1280, 960)
 MAX_IMAGE_BYTES = 12 * 1024 * 1024

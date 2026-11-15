@@ -132,3 +132,9 @@ The estimate uses the visual homography and returns null without matching
 calibration or adequate visual geometry. For stale fixes, any height is also
 last known. Subtract the camera's height above the lander reference point
 when appropriate for the mounted orientation.
+
+The included bench calibration applies to the exact `download (7).jpg` image.
+It uses the upper-right wheel's 30 mm diameter over about 97 pixels and a
+reference camera height of about 0.50 m. It assumes a near-overhead reference
+view and a centered principal point. Verify the scale against a second known
+height before relying on the measurements.
