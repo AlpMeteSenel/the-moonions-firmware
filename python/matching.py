@@ -18,18 +18,21 @@ class MapMatcher:
         self.live = live
         self.features = {}
 
+    def prepare(self, enhance=False):
+        if enhance not in self.features:
+            keys, descriptors = extract_features(self.reference, enhance)
+            index = cv.FlannBasedMatcher(dict(algorithm=1, trees=4),
+                                         dict(checks=32 if self.live else 64))
+            if descriptors is not None and len(descriptors) >= 2:
+                index.add([descriptors])
+                index.train()
+            self.features[enhance] = keys, index
+
     def locate(self, frame, allow_tentative=False, include_transform=False):
         errors = []
         tentative = None
         for enhance in (False, True):
-            if enhance not in self.features:
-                keys, descriptors = extract_features(self.reference, enhance)
-                index = cv.FlannBasedMatcher(dict(algorithm=1, trees=4),
-                                             dict(checks=32 if self.live else 64))
-                if descriptors is not None and len(descriptors) >= 2:
-                    index.add([descriptors])
-                    index.train()
-                self.features[enhance] = keys, index
+            self.prepare(enhance)
             try:
                 result = localize(self.reference, frame, self.features[enhance], enhance, allow_tentative, self.live)
                 if not include_transform:

@@ -21,9 +21,9 @@ from matching import MapMatcher, draw_projection
 # Optional. Edit in App Lab, then Stop and Run again.
 MAP_URL = ""
 # Bench map download (7).jpg. The upper-right 30 mm wheel spans about 97 px.
-# The reference was captured at roughly 0.50 m, assuming a near-overhead view.
+# The reference was captured at roughly 0.75 m, assuming a near-overhead view.
 BENCH_MAP_METERS_PER_PIXEL = 0.030 / 97
-BENCH_FOCAL_LENGTH_PX = 0.50 / BENCH_MAP_METERS_PER_PIXEL
+BENCH_FOCAL_LENGTH_PX = 0.75 / BENCH_MAP_METERS_PER_PIXEL
 HEIGHT_CALIBRATION = (
     "678543fb811057ac309efc4dd657305943b579091c46f165649e5126ccbe424b",
     BENCH_MAP_METERS_PER_PIXEL,
@@ -264,6 +264,8 @@ class LiveSession:
             try:
                 camera.start()
                 ready_at = monotonic() + 2
+                if not self.stop.is_set():
+                    self.matcher.prepare()
                 while not self.stop.is_set() and monotonic() - self.last_seen < 60:
                     frame = camera.capture()
                     if frame is not None and monotonic() >= ready_at:
